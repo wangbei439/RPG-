@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RPG Generator - AI一键生成RPG游戏</title>
+  <script type="module" crossorigin src="/assets/index-zzDs3tDJ.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-B98Q9cR2.css">
+</head>
+<body>
+    <div id="app">
+        <!-- 首页 - 游戏类型选择 -->
+        <section id="home-screen" class="screen active">
+            <header class="main-header">
+                <h1>🎮 RPG Generator</h1>
+                <p class="subtitle">AI驱动的一键式RPG游戏生成器</p>
+            </header>
+            
+            <div class="config-bar">
+                <button id="settings-btn" class="icon-btn" title="设置">⚙️</button>
+                <button id="load-saved-games-btn" class="icon-btn" title="读取存档">📂 读取存档</button>
+            </div>
+
+            <!-- 存档列表区域（默认隐藏） -->
+            <div id="saved-games-section" class="saved-games-section" style="display: none;">
+                <h2>📂 已保存的游戏</h2>
+                <div id="saved-games-list" class="saved-games-list">
+                    <!-- 存档列表将在这里动态生成 -->
+                </div>
+                <button id="close-saved-games" class="btn-secondary">关闭</button>
+            </div>
+
+            <div class="game-types">
+                <h2>选择RPG游戏类型</h2>
+                <div class="type-grid">
+                    <div class="type-card" data-type="adventure">
+                        <div class="type-icon">⚔️</div>
+                        <h3>冒险RPG</h3>
+                        <p>探索未知世界，完成任务，战胜敌人</p>
+                    </div>
+                    <div class="type-card" data-type="dungeon">
+                        <div class="type-icon">🏰</div>
+                        <h3>地牢探索</h3>
+                        <p>深入危险地牢，寻找宝藏，生存挑战</p>
+                    </div>
+                    <div class="type-card" data-type="romance">
+                        <div class="type-icon">💕</div>
+                        <h3>恋爱模拟</h3>
+                        <p>与角色建立情感关系，发展浪漫故事</p>
+                    </div>
+                    <div class="type-card" data-type="mystery">
+                        <div class="type-icon">🔍</div>
+                        <h3>推理探案</h3>
+                        <p>收集线索，解开谜题，找出真相</p>
+                    </div>
+                    <div class="type-card" data-type="fantasy">
+                        <div class="type-icon">🧙</div>
+                        <h3>奇幻魔法</h3>
+                        <p>学习魔法，探索奇幻世界，成为传奇</p>
+                    </div>
+                    <div class="type-card" data-type="scifi">
+                        <div class="type-icon">🚀</div>
+                        <h3>科幻星际</h3>
+                        <p>星际旅行，外星文明，未来科技</p>
+                    </div>
+                    <div class="type-card" data-type="survival">
+                        <div class="type-icon">🏕️</div>
+                        <h3>生存挑战</h3>
+                        <p>在恶劣环境中求生，建造庇护所</p>
+                    </div>
+                    <div class="type-card" data-type="kingdom">
+                        <div class="type-icon">👑</div>
+                        <h3>王国建设</h3>
+                        <p>管理王国，做出决策，影响国家命运</p>
+                    </div>
+                    <div class="type-card" data-type="cultivation">
+                        <div class="type-icon">🐉</div>
+                        <h3>修仙问道</h3>
+                        <p>修炼成仙，探索道法，飞升天界</p>
+                    </div>
+                    <div class="type-card" data-type="custom">
+                        <div class="type-icon">✨</div>
+                        <h3>自定义</h3>
+                        <p>完全自定义你的RPG游戏</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 游戏配置页面 -->
+        <section id="config-screen" class="screen">
+            <header class="screen-header">
+                <button id="back-to-home" class="back-btn">← 返回</button>
+                <h2 id="config-title">配置你的游戏</h2>
+            </header>
+
+            <form id="game-config-form" class="config-form">
+                <div class="form-group">
+                    <label for="game-name">游戏名称</label>
+                    <input type="text" id="game-name" placeholder="输入游戏名称或留空让AI生成" />
+                </div>
+
+                <div class="form-group">
+                    <label for="game-description">游戏描述 <span class="hint">(越详细越好)</span></label>
+                    <textarea id="game-description" rows="4" placeholder="描述你想要的游戏内容、故事背景、主要角色等..."></textarea>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="game-difficulty">难度</label>
+                        <select id="game-difficulty">
+                            <option value="easy">简单</option>
+                            <option value="normal" selected>普通</option>
+                            <option value="hard">困难</option>
+                            <option value="nightmare">噩梦</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="game-length">游戏长度</label>
+                        <select id="game-length">
+                            <option value="short">短篇 (10-20回合)</option>
+                            <option value="medium" selected>中篇 (30-50回合)</option>
+                            <option value="long">长篇 (50+回合)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="enable-images" checked />
+                        <span>启用AI图像生成</span>
+                    </label>
+                </div>
+
+                <div class="form-group image-config" id="image-config">
+                    <label for="image-source">图像来源</label>
+                    <select id="image-source">
+                        <option value="comfyui">ComfyUI (本地)</option>
+                        <option value="api">API服务</option>
+                        <option value="none">不使用图像</option>
+                    </select>
+
+                    <div id="comfyui-settings" class="sub-config">
+                        <input type="text" id="comfyui-url" placeholder="ComfyUI地址 (默认: http://127.0.0.1:8188)" value="http://127.0.0.1:8188" />
+                    </div>
+
+                    <div id="api-settings" class="sub-config" style="display:none">
+                        <input type="text" id="image-api-url" placeholder="图像API地址" />
+                        <input type="text" id="image-api-key" placeholder="API密钥" />
+                    </div>
+                </div>
+
+                <button type="submit" class="generate-btn">
+                    🚀 开始分步生成
+                </button>
+            </form>
+        </section>
+
+        <!-- 生成工作台 -->
+        <section id="generation-workbench" class="screen">
+            <header class="screen-header">
+                <button id="gen-back-to-config" class="back-btn">← 返回配置</button>
+                <h2 id="gen-title">生成工作台</h2>
+                <button id="gen-finalize-btn" class="finalize-btn" style="display:none">🎮 整合并生成游戏</button>
+            </header>
+
+            <!-- 步骤导航 -->
+            <div class="step-navigation" id="step-navigation"></div>
+
+            <div class="workbench-layout">
+                <!-- 左侧: 已生成元素面板 -->
+                <div class="elements-panel">
+                    <h3>📋 已确认元素</h3>
+                    <div id="confirmed-elements">
+                        <p class="empty-hint">尚未确认任何元素</p>
+                    </div>
+                </div>
+
+
+                <!-- 中间: 当前步骤工作区 -->
+                <div class="work-area">
+                    <div id="step-header" class="step-header">
+                        <h3 id="current-step-name">步骤名称</h3>
+                        <p id="current-step-desc">步骤描述</p>
+                    </div>
+                    <div id="step-loading" class="step-loading" style="display:none">
+                        <div class="loading-spinner"></div>
+                        <p>AI正在生成中，请稍候...</p>
+                    </div>
+                    <div id="candidates-container" class="candidates-container"></div>
+                    <div id="custom-input-area" class="custom-input-area" style="display:none">
+                        <textarea id="custom-feedback" placeholder="输入你的修改意见或自定义内容..."></textarea>
+                        <div class="custom-actions">
+                            <button id="apply-custom-btn" class="action-btn secondary">应用自定义内容</button>
+                        </div>
+                    </div>
+                    <div class="action-buttons" id="action-buttons">
+                        <button id="generate-only-btn" class="action-btn primary">⚡ 生成</button>
+                        <button id="regenerate-btn" class="action-btn secondary">🔄 重新生成</button>
+                        <button id="modify-btn" class="action-btn secondary">✏️ 修改选中</button>
+                        <button id="confirm-btn" class="action-btn primary" disabled>✅ 确认并继续</button>
+                        <button id="skip-btn" class="action-btn skip">⏭️ 跳过</button>
+                    </div>
+                </div>
+
+                <!-- 右侧: 调用状态台 -->
+                <div class="api-status-panel">
+                    <h3>📡 模型调用状态</h3>
+                    <div id="api-status" class="api-status">
+                        <div class="status-indicator">
+                            <span class="status-dot" id="api-status-dot"></span>
+                            <span id="api-status-text">就绪</span>
+                        </div>
+                    </div>
+                    <!-- 生成历史面板 -->
+                    <h3 style="margin-top:16px">📜 生成历史</h3>
+                    <div id="history-panel" class="history-panel">
+                        <p class="empty-hint">暂无生成记录</p>
+                    </div>
+
+                    <h3 style="margin-top:16px">📋 调用日志</h3>
+                    <div id="call-log" class="call-log"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 生成进度页面 (legacy fallback) -->
+        <section id="loading-screen" class="screen">
+            <div class="loading-container">
+                <div class="loading-spinner"></div>
+                <h2>正在生成你的RPG游戏...</h2>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <div id="loading-status" class="loading-status">初始化中...</div>
+                <div id="loading-details" class="loading-details"></div>
+            </div>
+        </section>
+
+        <!-- 游戏运行页面 -->
+        <section id="game-screen" class="screen">
+            <header class="game-header">
+                <button id="exit-game" class="back-btn">← 退出</button>
+                <h2 id="game-title">游戏标题</h2>
+                <button id="game-menu-btn" class="icon-btn">☰</button>
+            </header>
+
+            <div class="game-layout">
+                <!-- 左侧：场景图像 -->
+                <div class="scene-panel">
+                    <div id="scene-image" class="scene-image">
+                        <div class="placeholder">场景图像将在这里显示</div>
+                    </div>
+                    <div id="scene-image-controls" class="scene-image-controls">
+                        <div id="live-image-config" class="live-image-config"></div>
+                        <textarea id="scene-image-prompt" rows="4" placeholder="这里会自动带入当前场景描述，你也可以手动改成自己的生图提示词"></textarea>
+                        <div class="scene-image-actions">
+                            <label class="scene-count-field" for="scene-image-count">
+                                <span>数量</span>
+                                <input type="number" id="scene-image-count" min="1" max="8" value="1" />
+                            </label>
+                            <button id="generate-scene-image-btn" type="button" class="action-btn primary">生成场景图</button>
+                        </div>
+                        <div id="scene-image-status" class="helper-text">当前为手动生图模式，点击按钮后才会调用 ComfyUI。</div>
+                        <div id="scene-image-gallery" class="scene-gallery"></div>
+                    </div>
+                    <div id="scene-description" class="scene-description"></div>
+                </div>
+
+                <!-- 中间：对话/游戏区域 -->
+                <div class="game-main">
+                    <div id="scene-story-panel" class="scene-story-panel">
+                        <h3>场景描述</h3>
+                        <div id="scene-story-copy" class="scene-description"></div>
+                    </div>
+                    <div id="game-log" class="game-log"></div>
+                    <div class="input-area">
+                        <div id="choices-container" class="choices-container"></div>
+                        <div class="player-input">
+                            <input type="text" id="player-input" placeholder="输入你的行动或选择..." />
+                            <button id="send-btn" class="send-btn">发送</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右侧：状态面板 -->
+                <div class="status-panel">
+                    <div id="player-stats" class="player-stats"></div>
+                    <div id="inventory" class="inventory">
+                        <h3>📦 物品栏</h3>
+                        <ul id="inventory-list"></ul>
+                    </div>
+                    <div id="quest-log" class="quest-log">
+                        <h3>📜 任务日志</h3>
+                        <ul id="quest-list"></ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 设置模态框 -->
+        <div id="settings-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>⚙️ 设置</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="settings-section">
+                        <h3>AI模型配置</h3>
+                        <div class="form-group">
+                            <label for="llm-source">LLM来源</label>
+                            <select id="llm-source">
+                                <option value="openai">OpenAI API</option>
+                                <option value="anthropic">Anthropic API</option>
+                                <option value="local">本地模型 (Ollama)</option>
+                                <option value="custom">自定义API</option>
+                            </select>
+                        </div>
+
+                        <div id="openai-config" class="api-config">
+                            <input type="text" id="openai-url" placeholder="API地址 (默认: https://api.openai.com/v1)" />
+                            <input type="password" id="openai-key" placeholder="OpenAI API密钥" />
+                            <input type="text" id="openai-model" placeholder="模型 (默认: gpt-4o)" value="gpt-4o" />
+                            <div class="api-test-row">
+                                <button id="test-openai-btn" class="test-btn">🔗 测试连接</button>
+                                <span id="test-openai-result" class="test-result"></span>
+                            </div>
+                        </div>
+
+                        <div id="anthropic-config" class="api-config" style="display:none">
+                            <input type="password" id="anthropic-key" placeholder="Anthropic API密钥" />
+                            <input type="text" id="anthropic-model" placeholder="模型 (默认: claude-3-5-sonnet-20241022)" value="claude-3-5-sonnet-20241022" />
+                            <div class="api-test-row">
+                                <button id="test-anthropic-btn" class="test-btn">🔗 测试连接</button>
+                                <span id="test-anthropic-result" class="test-result"></span>
+                            </div>
+                        </div>
+
+                        <div id="local-config" class="api-config" style="display:none">
+                            <input type="text" id="ollama-url" placeholder="Ollama地址 (默认: http://localhost:11434)" value="http://localhost:11434" />
+                            <input type="text" id="ollama-model" placeholder="模型 (默认: llama3)" value="llama3" />
+                            <div class="api-test-row">
+                                <button id="test-local-btn" class="test-btn">🔗 测试连接</button>
+                                <span id="test-local-result" class="test-result"></span>
+                            </div>
+                        </div>
+
+                        <div id="custom-config" class="api-config" style="display:none">
+                            <input type="text" id="custom-url" placeholder="自定义API地址" />
+                            <input type="password" id="custom-key" placeholder="API密钥 (可选)" />
+                            <input type="text" id="custom-model" placeholder="模型名称" />
+                            <div class="api-test-row">
+                                <button id="test-custom-btn" class="test-btn">🔗 测试连接</button>
+                                <span id="test-custom-result" class="test-result"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button id="save-settings" class="save-btn">保存设置</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 游戏菜单模态框 -->
+        <div id="game-menu-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>游戏菜单</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <button class="menu-item" id="save-game">💾 保存游戏</button>
+                    <button class="menu-item" id="load-game">📂 加载游戏</button>
+                    <button class="menu-item" id="restart-game">🔄 重新开始</button>
+                    <button class="menu-item" id="export-game">📤 导出游戏</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

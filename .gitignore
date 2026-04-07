@@ -1,0 +1,7 @@
+.kilo/
+**/node_modules/
+backend/data/
+*.log
+nul
+.DS_Store
+Thumbs.db

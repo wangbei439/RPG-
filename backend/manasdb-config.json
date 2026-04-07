@@ -1,0 +1,6 @@
+{
+  "enabled": true,
+  "namespace": "rpg-generator",
+  "embeddingModel": "all-MiniLM-L6-v2",
+  "description": "ManasDB 记忆服务配置 - 可选启用"
+}

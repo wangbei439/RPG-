@@ -1,0 +1,10 @@
+{
+  "llmSource": "openai",
+  "apiUrl": "https://api.openai.com/v1",
+  "apiKey": "",
+  "model": "gpt-4o",
+  "imageSource": "none",
+  "comfyuiUrl": "http://127.0.0.1:8000",
+  "imageApiUrl": "",
+  "imageApiKey": ""
+}
