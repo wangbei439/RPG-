@@ -14,6 +14,10 @@ class GameEngine {
     async restore(state) {
         this.llm.initialize(this.config?.settings || {});
         this.state = state ? JSON.parse(JSON.stringify(state)) : null;
+        if (this.state) {
+            this.state.visualDirectives = this.state.visualDirectives || this.buildVisualDirectives({});
+            this.state.visualState = this.buildVisualState();
+        }
         await this.ensureMemoryBootstrap();
         return this.state;
     }
@@ -54,8 +58,12 @@ class GameEngine {
             history: [],
             sceneDescription: opening.description || '',
             initialLog: opening.narration || '',
-            gameOver: false
+            gameOver: false,
+            visualDirectives: null,
+            visualState: null
         };
+        this.state.visualDirectives = this.buildVisualDirectives({});
+        this.state.visualState = this.buildVisualState();
 
         await this.ensureMemoryBootstrap();
         return this.state;
@@ -69,14 +77,17 @@ class GameEngine {
         this.state.turn += 1;
         this.state.history.push({ turn: this.state.turn, action });
 
+        const previousVisualState = this.cloneVisualState(this.state.visualState);
         const context = await this.buildContext(action);
         const prompt = this.buildGamePrompt(context, action);
         const result = await this.llm.generateJSON(prompt);
 
         this.updateState(result);
+        this.state.visualState = this.buildVisualState();
 
         const choices = Array.isArray(result.choices) ? result.choices : [];
         const response = result.narration || result.response || '故事继续推进。';
+        const visualSceneChanged = this.hasVisualSceneChanged(previousVisualState, this.state.visualState);
         this.updateLatestHistoryEntry(response);
         await Promise.all([
             this.persistTurnMemory(action, response, result),
@@ -88,6 +99,8 @@ class GameEngine {
             choices,
             gameState: this.state,
             sceneDescription: this.state.sceneDescription,
+            visualState: this.state.visualState,
+            visualSceneChanged,
             gameOver: this.state.gameOver,
             gameOverMessage: this.state.gameOverMessage,
             recalledMemories: context.recalledMemories || []
@@ -157,8 +170,8 @@ class GameEngine {
             `知识图谱事实：${compactGraphFacts}`,
             `玩家行动：${action}`,
             '请返回如下结构：',
-            '{"narration":"旁白描述","dialogues":[{"speaker":"角色名","content":"对白内容"}],"choices":[{"text":"选项文本","action":"对应行动"}],"statChanges":{"属性名":-5},"newItems":[{"name":"物品名","description":"物品描述"}],"questUpdates":[{"questId":"任务ID","completed":false,"progress":"进度说明"}],"sceneChange":"新的场景描述","stateUpdates":{"playerLocation":"新地点","playerEmotion":"当前情绪","currentScene":"场景标识","world":{"time":"时间","weather":"天气","eventsAdd":["新增世界事件"]},"chapterAdvance":false},"relationshipUpdates":[{"characterId":"角色ID或空","characterName":"角色名","relationshipDelta":2,"mood":"情绪","state":"状态","location":"地点"}],"memoryFacts":[{"subject":"主体","subjectType":"player/character/location/item/quest/world","predicate":"关系","object":"客体","objectType":"character/location/item/quest/world/event","attributes":{"key":"value"}}],"gameOver":false,"gameOverMessage":"结束提示"}',
-            '要求：叙事连贯，选项有意义，角色性格保持一致，避免脱离已确认设定。stateUpdates、relationshipUpdates、memoryFacts 只填写本回合真正产生的新变化，没有就返回空对象或空数组。'
+            '{"narration":"旁白描述","dialogues":[{"speaker":"角色名","content":"对白内容"}],"choices":[{"text":"选项文本","action":"对应行动"}],"statChanges":{"属性名":-5},"newItems":[{"name":"物品名","description":"物品描述"}],"questUpdates":[{"questId":"任务ID","completed":false,"progress":"进度说明"}],"sceneChange":"新的场景描述","stateUpdates":{"playerLocation":"新地点","playerEmotion":"当前情绪","currentScene":"场景标识","world":{"time":"时间","weather":"天气","eventsAdd":["新增世界事件"]},"chapterAdvance":false},"relationshipUpdates":[{"characterId":"角色ID或空","characterName":"角色名","relationshipDelta":2,"mood":"情绪","state":"状态","location":"地点"}],"memoryFacts":[{"subject":"主体","subjectType":"player/character/location/item/quest/world","predicate":"关系","object":"客体","objectType":"character/location/item/quest/world/event","attributes":{"key":"value"}}],"visualCue":{"focus":"本回合画面焦点","camera":"远景/中景/近景等","mood":"画面氛围","onStageCharacters":["当前画面中最重要的角色"],"shouldChangeBackground":false},"gameOver":false,"gameOverMessage":"结束提示"}',
+            '要求：叙事连贯，选项有意义，角色性格保持一致，避免脱离已确认设定。stateUpdates、relationshipUpdates、memoryFacts 只填写本回合真正产生的新变化，没有就返回空对象或空数组。visualCue 用来描述画面焦点；只有场景底图确实应当明显变化时，shouldChangeBackground 才返回 true。'
         ].join('\n\n');
     }
 
@@ -231,6 +244,8 @@ class GameEngine {
         if (result.dialogues) {
             this.state.lastDialogues = result.dialogues;
         }
+
+        this.state.visualDirectives = this.buildVisualDirectives(result);
     }
 
     applyRelationshipUpdates(updates) {
@@ -315,6 +330,101 @@ class GameEngine {
         latest.response = response;
         latest.sceneDescription = this.state.sceneDescription;
         latest.location = this.state.player?.location || '';
+        latest.visualSignature = this.state.visualState?.signature || '';
+    }
+
+    buildVisualState() {
+        const location = this.state?.player?.location || this.gameData?.openingScene?.startingLocation || '未知地点';
+        const currentScene = this.state?.currentScene || 'scene';
+        const timeOfDay = this.state?.worldState?.time || '未知时间';
+        const weather = this.state?.worldState?.weather || '未知天气';
+        const directives = this.state?.visualDirectives || {};
+        const mood = directives.mood || this.state?.player?.emotion || '平静';
+        const focus = directives.focus || currentScene;
+        const camera = directives.camera || '中景';
+        const onStageCharacters = Array.isArray(directives.onStageCharacters) ? directives.onStageCharacters.slice(0, 4) : [];
+        const castSignature = onStageCharacters.join('+');
+        const signatureParts = [currentScene, location, timeOfDay, weather, mood, focus, camera]
+            .map((value) => String(value || '').trim())
+            .filter(Boolean);
+
+        return {
+            sceneId: currentScene,
+            location,
+            timeOfDay,
+            weather,
+            mood,
+            focus,
+            camera,
+            onStageCharacters,
+            castSignature,
+            forceBackgroundRefresh: directives.shouldChangeBackground === true,
+            prompt: this.state?.sceneDescription || this.state?.initialLog || '',
+            signature: signatureParts.join('|')
+        };
+    }
+
+    cloneVisualState(visualState) {
+        return visualState ? JSON.parse(JSON.stringify(visualState)) : null;
+    }
+
+    hasVisualSceneChanged(previousVisualState, nextVisualState) {
+        if (!previousVisualState && nextVisualState) {
+            return true;
+        }
+
+        if (!nextVisualState) {
+            return false;
+        }
+
+        return nextVisualState.forceBackgroundRefresh === true
+            || previousVisualState?.signature !== nextVisualState.signature
+            || (
+                previousVisualState?.castSignature
+                && nextVisualState.castSignature
+                && previousVisualState.castSignature !== nextVisualState.castSignature
+                && previousVisualState.location !== nextVisualState.location
+            );
+    }
+
+    buildVisualDirectives(result = {}) {
+        const visualCue = result.visualCue && typeof result.visualCue === 'object' ? result.visualCue : {};
+        const fallbackCharacters = this.extractDialogueCharacters(result.dialogues || this.state?.lastDialogues || []);
+        const onStageCharacters = this.normalizeCharacterList(
+            Array.isArray(visualCue.onStageCharacters) && visualCue.onStageCharacters.length
+                ? visualCue.onStageCharacters
+                : fallbackCharacters
+        );
+
+        return {
+            focus: String(visualCue.focus || result.sceneChange || this.state?.currentScene || '').trim(),
+            camera: String(visualCue.camera || '中景').trim(),
+            mood: String(visualCue.mood || this.state?.player?.emotion || '平静').trim(),
+            onStageCharacters,
+            shouldChangeBackground: visualCue.shouldChangeBackground === true
+        };
+    }
+
+    extractDialogueCharacters(dialogues = []) {
+        if (!Array.isArray(dialogues) || dialogues.length === 0) {
+            return [];
+        }
+
+        return dialogues
+            .map((item) => String(item?.speaker || '').trim())
+            .filter((name) => name && !['旁白', '系统', '玩家', '冒险者'].includes(name));
+    }
+
+    normalizeCharacterList(list = []) {
+        if (!Array.isArray(list)) {
+            return [];
+        }
+
+        return [...new Set(
+            list
+                .map((item) => String(item || '').trim())
+                .filter(Boolean)
+        )].slice(0, 4);
     }
 
     async ensureMemoryBootstrap() {

@@ -10,6 +10,7 @@ const ImageService = require('./utils/ImageService');
 const MemoryManager = require('./engine/MemoryManager');
 const StepGenerator = require('./engine/StepGenerator');
 const GameFinalizer = require('./engine/GameFinalizer');
+const ProjectManager = require('./engine/ProjectManager');
 const LLMService = require('./utils/LLMService');
 const ManasDBService = require('./utils/ManasDBService');
 
@@ -17,6 +18,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const SESSION_TIMEOUT = 30 * 60 * 1000;
 const GAME_TIMEOUT = 12 * 60 * 60 * 1000;
+const PROJECT_TIMEOUT = 12 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL = 60 * 1000;
 const COMFY_WORKFLOWS_DIR = 'G:\\comfy\\wenjian\\user\\default\\workflows';
 const MANASDB_CONFIG_PATH = path.join(__dirname, 'manasdb-config.json');
@@ -26,12 +28,15 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const games = new Map();
+const projects = new Map();
 const generationSessions = new Map();
 const generator = new GameGenerator();
 const imageService = new ImageService();
 const stepGenerator = new StepGenerator();
 const finalizer = new GameFinalizer();
+const projectManager = new ProjectManager();
 const memoryService = new ManasDBService(loadManasConfig());
+const sceneImageCache = new Map();
 
 function createHttpError(status, message) {
     const error = new Error(message);
@@ -131,6 +136,32 @@ function getSessionOrThrow(sessionId) {
     return session;
 }
 
+function getProjectOrThrow(projectId) {
+    const project = projects.get(projectId);
+    if (!project) {
+        throw createHttpError(404, '项目不存在');
+    }
+
+    project.updatedAt = Date.now();
+    return project;
+}
+
+function createGenerationSession(userInput, gameType, config, options = {}) {
+    const sessionId = uuidv4();
+    generationSessions.set(sessionId, {
+        memory: new MemoryManager(userInput, gameType, {
+            seedData: options.seedData,
+            sourceProject: options.sourceProject
+        }),
+        config,
+        projectId: options.projectId || null,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+    });
+
+    return sessionId;
+}
+
 function sendSseEvent(res, payload) {
     res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
@@ -172,8 +203,36 @@ function cleanupExpiredRecords() {
     for (const [id, game] of games.entries()) {
         if (now - (game.updatedAt || game.createdAt) > GAME_TIMEOUT) {
             games.delete(id);
+            for (const cacheKey of sceneImageCache.keys()) {
+                if (cacheKey.startsWith(`${id}:`)) {
+                    sceneImageCache.delete(cacheKey);
+                }
+            }
         }
     }
+
+    for (const [id, project] of projects.entries()) {
+        if (now - (project.updatedAt || project.createdAt) > PROJECT_TIMEOUT) {
+            projects.delete(id);
+        }
+    }
+}
+
+function buildSceneCacheKey(gameId, visualState = {}, imageConfig = {}) {
+    const signature = visualState.signature || 'default';
+    const configParts = [
+        imageConfig.imageSource || 'none',
+        imageConfig.comfyuiModel || '',
+        imageConfig.comfyuiWorkflowFile || '',
+        imageConfig.comfyuiWidth || '',
+        imageConfig.comfyuiHeight || '',
+        imageConfig.comfyuiSteps || '',
+        imageConfig.comfyuiCfg || '',
+        imageConfig.comfyuiPromptPrefix || '',
+        imageConfig.comfyuiPromptSuffix || ''
+    ];
+
+    return `${gameId}:${signature}:${configParts.join('|')}`;
 }
 
 setInterval(cleanupExpiredRecords, CLEANUP_INTERVAL);
@@ -261,10 +320,28 @@ app.post('/api/games/:gameId/action', asyncRoute('Process action error', async (
         ...(req.body?.imageConfig || {})
     };
 
-    if (effectiveImageConfig.enableImages && effectiveImageConfig.imageSource !== 'none' && effectiveImageConfig.imageGenerationMode === 'auto') {
+    if (
+        effectiveImageConfig.enableImages
+        && effectiveImageConfig.imageSource !== 'none'
+        && effectiveImageConfig.imageGenerationMode === 'auto'
+        && result.visualSceneChanged
+    ) {
         try {
-            const imagePrompt = result.sceneDescription || result.response;
-            result.sceneImage = await imageService.generateImage(imagePrompt, effectiveImageConfig);
+            const visualState = result.visualState || game.state?.visualState || {};
+            const imagePrompt = visualState.prompt || result.sceneDescription || result.response;
+            const cacheKey = buildSceneCacheKey(game.id, visualState, effectiveImageConfig);
+            const cachedImage = sceneImageCache.get(cacheKey);
+
+            if (cachedImage) {
+                result.sceneImage = cachedImage;
+                result.sceneImageFromCache = true;
+            } else if (imagePrompt) {
+                result.sceneImage = await imageService.generateImage(imagePrompt, effectiveImageConfig);
+                if (result.sceneImage) {
+                    sceneImageCache.set(cacheKey, result.sceneImage);
+                }
+                result.sceneImageFromCache = false;
+            }
         } catch (imageError) {
             console.warn('Image generation failed:', imageError.message);
         }
@@ -292,10 +369,15 @@ app.post('/api/games/:gameId/generate-image', asyncRoute('Generate scene image e
     };
 
     const images = await imageService.generateImages(prompt, config);
+    const visualState = game.state?.visualState || {};
+    if (images[0] && visualState.signature) {
+        sceneImageCache.set(buildSceneCacheKey(game.id, visualState, config), images[0]);
+    }
     res.json({
         prompt,
         count: images.length,
-        images
+        images,
+        visualState
     });
 }));
 
@@ -308,6 +390,7 @@ app.get('/api/health', (req, res) => {
     res.json({
         status: 'ok',
         gamesCount: games.size,
+        projectsCount: projects.size,
         sessionsCount: generationSessions.size,
         memory: memoryService.getStatus()
     });
@@ -364,19 +447,88 @@ app.post('/api/test-connection', asyncRoute('Test connection error', async (req,
     res.json(result);
 }));
 
+app.post('/api/projects/import-text', asyncRoute('Import text project error', async (req, res) => {
+    const { title, content, gameType, adaptationMode } = req.body || {};
+
+    if (!content || !String(content).trim()) {
+        throw createHttpError(400, '缺少导入文本内容');
+    }
+
+    const project = projectManager.createImportedProject({
+        title,
+        content,
+        gameType,
+        adaptationMode
+    });
+
+    projects.set(project.id, project);
+
+    res.json({
+        success: true,
+        project
+    });
+}));
+
+app.get('/api/projects/:projectId', asyncRoute('Get project error', async (req, res) => {
+    const project = getProjectOrThrow(req.params.projectId);
+    res.json({ project });
+}));
+
+app.post('/api/projects/:projectId/update', asyncRoute('Update project error', async (req, res) => {
+    const project = getProjectOrThrow(req.params.projectId);
+    const edits = req.body?.edits || req.body || {};
+    const updatedProject = projectManager.applyProjectEdits(project, edits);
+
+    projects.set(updatedProject.id, updatedProject);
+
+    res.json({
+        success: true,
+        project: updatedProject
+    });
+}));
+
+app.post('/api/projects/:projectId/init-session', asyncRoute('Init imported project session error', async (req, res) => {
+    const project = getProjectOrThrow(req.params.projectId);
+    const config = req.body?.config || {};
+    const seed = projectManager.buildGenerationSeed(project, {
+        gameType: req.body?.gameType,
+        userInput: req.body?.userInput
+    });
+    const sessionId = createGenerationSession(seed.userInput, seed.gameType, config, {
+        seedData: seed.seedData,
+        sourceProject: seed.sourceProject,
+        projectId: project.id
+    });
+
+    res.json({
+        success: true,
+        projectId: project.id,
+        sessionId,
+        firstStep: 'worldview',
+        steps: stepGenerator.steps,
+        seededCategories: Object.keys(seed.seedData || {}).filter((key) => {
+            const value = seed.seedData[key];
+            return Array.isArray(value) ? value.length > 0 : Boolean(value && (typeof value !== 'object' || Object.keys(value).length > 0));
+        })
+    });
+}));
+
 app.post('/api/generate/init', asyncRoute('Init generation error', async (req, res) => {
-    const { userInput, gameType, config } = req.body;
+    const {
+        userInput,
+        gameType,
+        config,
+        seedData,
+        sourceProject
+    } = req.body;
 
     if (!userInput || !gameType) {
         throw createHttpError(400, '缺少必要参数：userInput、gameType');
     }
 
-    const sessionId = uuidv4();
-    generationSessions.set(sessionId, {
-        memory: new MemoryManager(userInput, gameType),
-        config,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
+    const sessionId = createGenerationSession(userInput, gameType, config, {
+        seedData,
+        sourceProject
     });
 
     res.json({

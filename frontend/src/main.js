@@ -9,6 +9,8 @@ import {
 
 const state = {
     currentGameType: null,
+    currentProjectId: null,
+    currentProjectData: null,
     currentGameId: null,
     currentGameData: null,
     gameState: null,
@@ -19,7 +21,11 @@ const state = {
     stepStates: {},
     sceneImages: [],
     selectedSceneImageIndex: 0,
-    lastSuggestedImagePrompt: ''
+    lastSuggestedImagePrompt: '',
+    activeSceneImage: '',
+    transitioningSceneImage: '',
+    currentVisualSignature: '',
+    sceneImageTransitionToken: 0
 };
 
 const LLM_SETTINGS_KEY = 'rpg_generator_settings';
@@ -55,6 +61,8 @@ document.addEventListener('DOMContentLoaded', () => {
     initSavedGames();
     initSettings();
     initConfigForm();
+    initImportForm();
+    initImportPreviewEditor();
     initWorkbench();
     initGameScreen();
     loadSettings();
@@ -494,6 +502,8 @@ function initNavigation() {
     document.querySelectorAll('.type-card').forEach((card) => {
         card.addEventListener('click', () => {
             state.currentGameType = card.dataset.type;
+            state.currentProjectId = null;
+            state.currentProjectData = null;
             document.querySelectorAll('.type-card').forEach((item) => item.classList.remove('selected'));
             card.classList.add('selected');
 
@@ -503,7 +513,18 @@ function initNavigation() {
     });
 
     document.getElementById('back-to-home').addEventListener('click', () => showScreen('home-screen'));
-    document.getElementById('gen-back-to-config').addEventListener('click', () => showScreen('config-screen'));
+    document.getElementById('open-import-screen')?.addEventListener('click', () => {
+        setImportStatus('导入后会自动创建项目，并预填到现有生成流程中。');
+        showScreen('import-screen');
+    });
+    document.getElementById('back-from-import')?.addEventListener('click', () => showScreen('home-screen'));
+    document.getElementById('back-to-import-edit')?.addEventListener('click', () => showScreen('import-screen'));
+    document.getElementById('confirm-import-preview')?.addEventListener('click', async () => {
+        await startImportedProjectSession();
+    });
+    document.getElementById('gen-back-to-config').addEventListener('click', () => {
+        showScreen(state.currentProjectId ? 'import-screen' : 'config-screen');
+    });
 
     document.getElementById('exit-game').addEventListener('click', () => {
         if (confirm('确定退出当前游戏吗？未保存进度将会丢失。')) {
@@ -864,6 +885,102 @@ function initConfigForm() {
     });
 }
 
+function initImportForm() {
+    document.getElementById('import-project-form')?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        await initImportedProjectGenerationSession();
+    });
+}
+
+function setImportStatus(message, tone = '') {
+    const status = document.getElementById('import-status');
+    if (!status) {
+        return;
+    }
+
+    status.textContent = message;
+    status.className = `helper-text ${tone}`.trim();
+}
+
+function renderImportedProjectPreview(project = state.currentProjectData) {
+    if (!project) {
+        return;
+    }
+
+    const summaryEl = document.getElementById('import-preview-summary');
+    const charactersEl = document.getElementById('import-preview-characters');
+    const chaptersEl = document.getElementById('import-preview-chapters');
+    const visualsEl = document.getElementById('import-preview-visuals');
+
+    if (summaryEl) {
+        const themes = Array.isArray(project.storyBible?.themes) && project.storyBible.themes.length
+            ? project.storyBible.themes.join('、')
+            : '待补充';
+        const locations = Array.isArray(project.storyBible?.locations)
+            ? project.storyBible.locations.slice(0, 5).map((item) => item.name).join('、')
+            : '';
+        summaryEl.innerHTML = `
+            <p><strong>${escapeHtml(project.title || '未命名项目')}</strong></p>
+            <p>${escapeHtml(project.storyBible?.summary || project.source?.excerpt || '暂无摘要')}</p>
+            <p>主题：${escapeHtml(themes)}</p>
+            <p>主要地点：${escapeHtml(locations || '待补充')}</p>
+            <p>改编模式：${escapeHtml(project.adaptationMode || 'balanced')}</p>
+        `;
+    }
+
+    if (charactersEl) {
+        const characters = Array.isArray(project.storyBible?.characters) ? project.storyBible.characters : [];
+        charactersEl.innerHTML = characters.length
+            ? characters.map((character) => `
+                <article class="preview-pill-card">
+                    <strong>${escapeHtml(character.name || '未命名角色')}</strong>
+                    <span>${escapeHtml(character.role || '待定角色')}</span>
+                </article>
+            `).join('')
+            : '<p class="empty-hint">暂未提取到明显角色，可继续进入工作台补充。</p>';
+    }
+
+    if (chaptersEl) {
+        const chapters = Array.isArray(project.storyBible?.chapters) ? project.storyBible.chapters : [];
+        chaptersEl.innerHTML = chapters.length
+            ? chapters.map((chapter) => `
+                <article class="preview-list-item">
+                    <strong>${escapeHtml(chapter.title || chapter.name || '未命名章节')}</strong>
+                    <p>${escapeHtml(chapter.summary || '暂无章节摘要')}</p>
+                </article>
+            `).join('')
+            : '<p class="empty-hint">未识别到章节结构，后续会按段落自动拆分。</p>';
+    }
+
+    if (visualsEl) {
+        const characterHints = Array.isArray(project.visualBible?.characterSheets)
+            ? project.visualBible.characterSheets.slice(0, 4).map((item) => item.name).join('、')
+            : '';
+        const locationHints = Array.isArray(project.visualBible?.locationSheets)
+            ? project.visualBible.locationSheets.slice(0, 4).map((item) => item.name).join('、')
+            : '';
+        visualsEl.innerHTML = `
+            <p>角色基准图建议：${escapeHtml(characterHints || '先在工作台确认角色后再生成')}</p>
+            <p>场景基准图建议：${escapeHtml(locationHints || '先在工作台确认地点后再生成')}</p>
+            <p>视觉风格：${escapeHtml(project.visualBible?.styleProfile?.atmosphere || '待确认')}</p>
+        `;
+    }
+}
+
+async function beginGenerationWorkbench(data) {
+    state.currentSessionId = data.sessionId;
+    state.allSteps = data.steps || [];
+    state.currentStepId = data.firstStep || state.allSteps[0]?.id || null;
+    state.stepStates = {};
+
+    showScreen('generation-workbench');
+    renderStepNavigation();
+    await renderConfirmedElements();
+    renderCurrentStep(state.currentStepId);
+    renderHistoryPanel();
+    setApiStatus('idle', '已创建生成会话，点击“生成”开始当前步骤。');
+}
+
 async function initGenerationSession() {
     const generationConfig = normalizeGenerationConfig(collectGenerationConfig());
     state.currentGenerationConfig = generationConfig;
@@ -877,22 +994,484 @@ async function initGenerationSession() {
 
     try {
         const data = await requestJson('/generate/init', createJsonRequest('POST', payload));
-        state.currentSessionId = data.sessionId;
-        state.allSteps = data.steps || [];
-        state.currentStepId = state.allSteps[0]?.id || null;
-        state.stepStates = {};
-
-        showScreen('generation-workbench');
-        renderStepNavigation();
-        await renderConfirmedElements();
-
-        renderCurrentStep(state.currentStepId);
-        renderHistoryPanel();
-        setApiStatus('idle', '已创建生成会话，点击“生成”开始当前步骤。');
+        state.currentProjectId = null;
+        state.currentProjectData = null;
+        await beginGenerationWorkbench(data);
+        return;
     } catch (error) {
         console.error('Session init error:', error);
         alert(`初始化失败：${error.message}`);
         showScreen('config-screen');
+    }
+}
+
+async function initImportedProjectGenerationSession() {
+    const content = document.getElementById('import-content')?.value.trim() || '';
+    if (!content) {
+        setImportStatus('请先粘贴要导入的长文本内容。', 'error');
+        return;
+    }
+
+    const generationConfig = normalizeGenerationConfig(collectGenerationConfig());
+    state.currentGenerationConfig = generationConfig;
+    saveGenerationSettings();
+    setImportStatus('正在解析长文本并创建项目...', 'pending');
+
+    try {
+        const importPayload = {
+            title: document.getElementById('import-title')?.value.trim() || '',
+            content,
+            gameType: document.getElementById('import-game-type')?.value || 'custom',
+            adaptationMode: document.getElementById('adaptation-mode')?.value || 'balanced'
+        };
+        const imported = await requestJson('/projects/import-text', createJsonRequest('POST', importPayload));
+        state.currentProjectId = imported.project?.id || null;
+        state.currentProjectData = imported.project || null;
+        state.currentGameType = importPayload.gameType;
+        renderImportedProjectPreview(imported.project);
+        setImportStatus('导入成功，请先检查提取结果，再决定是否进入工作台。', 'success');
+        showScreen('import-preview-screen');
+    } catch (error) {
+        console.error('Imported project init error:', error);
+        setImportStatus(error.message, 'error');
+    }
+}
+
+async function startImportedProjectSession() {
+    if (!state.currentProjectId) {
+        setImportStatus('当前没有可用的导入项目，请重新导入。', 'error');
+        showScreen('import-screen');
+        return;
+    }
+
+    const generationConfig = normalizeGenerationConfig(collectGenerationConfig());
+    state.currentGenerationConfig = generationConfig;
+    saveGenerationSettings();
+
+    try {
+        const sessionData = await requestJson(
+            `/projects/${state.currentProjectId}/init-session`,
+            createJsonRequest('POST', {
+                config: generationConfig,
+                gameType: state.currentProjectData?.gameType || state.currentGameType || 'custom',
+                userInput: state.currentProjectData?.storyBible?.summary || state.currentProjectData?.source?.excerpt || ''
+            })
+        );
+
+        await beginGenerationWorkbench(sessionData);
+        setImportStatus('导入项目已进入生成工作台。', 'success');
+    } catch (error) {
+        console.error('Start imported project session error:', error);
+        setImportStatus(error.message, 'error');
+        showScreen('import-screen');
+    }
+}
+
+function initImportPreviewEditor() {
+    document.getElementById('save-import-preview')?.addEventListener('click', async () => {
+        await saveImportedProjectEdits();
+    });
+
+    document.getElementById('import-preview-screen')?.addEventListener('click', (event) => {
+        const actionButton = event.target.closest('[data-preview-action]');
+        if (!actionButton) {
+            return;
+        }
+
+        handleImportPreviewAction(actionButton.dataset.previewAction, actionButton);
+    });
+}
+
+function setImportPreviewStatus(message, tone = '') {
+    const status = document.getElementById('import-preview-status');
+    if (!status) {
+        return;
+    }
+
+    status.textContent = message;
+    status.className = `helper-text ${tone}`.trim();
+}
+
+function cloneJson(value) {
+    return JSON.parse(JSON.stringify(value || {}));
+}
+
+function createEmptyPreviewCharacter(index = 0) {
+    return {
+        id: `draft_char_${Date.now()}_${index}`,
+        name: '',
+        role: '',
+        description: ''
+    };
+}
+
+function createEmptyPreviewChapter(index = 0) {
+    return {
+        id: `draft_chapter_${Date.now()}_${index}`,
+        title: `新章节 ${index + 1}`,
+        summary: ''
+    };
+}
+
+function createEmptyPreviewLocation(index = 0) {
+    return {
+        id: `draft_location_${Date.now()}_${index}`,
+        name: '',
+        description: ''
+    };
+}
+
+function buildImportPreviewDraftFromForm() {
+    const base = cloneJson(state.currentProjectData);
+    const edits = collectImportedProjectEdits();
+
+    base.storyBible = base.storyBible || {};
+    base.source = base.source || {};
+    base.title = edits.title || base.title || '';
+    base.storyBible.summary = edits.summary || base.storyBible.summary || '';
+    base.storyBible.characters = edits.characters;
+    base.storyBible.chapters = edits.chapters;
+    base.storyBible.locations = edits.locations;
+    base.source.title = base.title || base.source.title || '';
+
+    return base;
+}
+
+function handleImportPreviewAction(action, actionButton) {
+    if (!action || !state.currentProjectData) {
+        return;
+    }
+
+    const draft = buildImportPreviewDraftFromForm();
+    draft.storyBible = draft.storyBible || {};
+
+    if (action === 'add-character') {
+        const characters = Array.isArray(draft.storyBible.characters) ? draft.storyBible.characters : [];
+        characters.push(createEmptyPreviewCharacter(characters.length));
+        draft.storyBible.characters = characters;
+    }
+
+    if (action === 'remove-character') {
+        const item = actionButton.closest('[data-preview-item="character"]');
+        const index = Number(item?.dataset.index ?? -1);
+        draft.storyBible.characters = (draft.storyBible.characters || []).filter((_entry, currentIndex) => currentIndex !== index);
+    }
+
+    if (action === 'add-chapter') {
+        const chapters = Array.isArray(draft.storyBible.chapters) ? draft.storyBible.chapters : [];
+        chapters.push(createEmptyPreviewChapter(chapters.length));
+        draft.storyBible.chapters = chapters;
+    }
+
+    if (action === 'remove-chapter') {
+        const item = actionButton.closest('[data-preview-item="chapter"]');
+        const index = Number(item?.dataset.index ?? -1);
+        draft.storyBible.chapters = (draft.storyBible.chapters || []).filter((_entry, currentIndex) => currentIndex !== index);
+    }
+
+    if (action === 'add-location') {
+        const locations = Array.isArray(draft.storyBible.locations) ? draft.storyBible.locations : [];
+        locations.push(createEmptyPreviewLocation(locations.length));
+        draft.storyBible.locations = locations;
+    }
+
+    if (action === 'remove-location') {
+        const item = actionButton.closest('[data-preview-item="location"]');
+        const index = Number(item?.dataset.index ?? -1);
+        draft.storyBible.locations = (draft.storyBible.locations || []).filter((_entry, currentIndex) => currentIndex !== index);
+    }
+
+    state.currentProjectData = draft;
+    renderImportedProjectPreview(draft);
+    setImportPreviewStatus('本地预览已更新，记得保存后再进入工作台。', 'pending');
+}
+
+function collectImportPreviewCollection(type, mapper) {
+    return Array.from(document.querySelectorAll(`[data-preview-collection="${type}"] [data-preview-item="${type}"]`))
+        .map((element, index) => mapper(element, index));
+}
+
+function collectImportedProjectEdits() {
+    return {
+        title: document.getElementById('import-preview-title')?.value.trim() || state.currentProjectData?.title || '',
+        summary: document.getElementById('import-preview-summary-input')?.value.trim() || state.currentProjectData?.storyBible?.summary || '',
+        characters: collectImportPreviewCollection('character', (element, index) => ({
+            id: element.dataset.itemId || `import_char_${index + 1}`,
+            name: element.querySelector('[data-field="name"]')?.value.trim() || '',
+            role: element.querySelector('[data-field="role"]')?.value.trim() || '',
+            description: element.querySelector('[data-field="description"]')?.value.trim() || ''
+        })).filter((character) => character.name || character.role || character.description),
+        chapters: collectImportPreviewCollection('chapter', (element, index) => ({
+            id: element.dataset.itemId || `chapter_${index + 1}`,
+            title: element.querySelector('[data-field="title"]')?.value.trim() || `章节 ${index + 1}`,
+            summary: element.querySelector('[data-field="summary"]')?.value.trim() || ''
+        })).filter((chapter) => chapter.title || chapter.summary),
+        locations: collectImportPreviewCollection('location', (element, index) => ({
+            id: element.dataset.itemId || `import_loc_${index + 1}`,
+            name: element.querySelector('[data-field="name"]')?.value.trim() || '',
+            description: element.querySelector('[data-field="description"]')?.value.trim() || ''
+        })).filter((location) => location.name || location.description)
+    };
+}
+
+function renderImportedProjectPreview(project = state.currentProjectData) {
+    if (!project) {
+        return;
+    }
+
+    const summaryEl = document.getElementById('import-preview-summary');
+    const charactersEl = document.getElementById('import-preview-characters');
+    const chaptersEl = document.getElementById('import-preview-chapters');
+    const visualsEl = document.getElementById('import-preview-visuals');
+    const summary = project.storyBible?.summary || project.source?.excerpt || '';
+    const themes = Array.isArray(project.storyBible?.themes) && project.storyBible.themes.length
+        ? project.storyBible.themes.join('、')
+        : '待补充';
+    const characters = Array.isArray(project.storyBible?.characters) ? project.storyBible.characters : [];
+    const chapters = Array.isArray(project.storyBible?.chapters) ? project.storyBible.chapters : [];
+    const locations = Array.isArray(project.storyBible?.locations) ? project.storyBible.locations : [];
+    const locationNames = locations.slice(0, 5).map((item) => item.name).filter(Boolean).join('、');
+    const characterHints = characters.slice(0, 4).map((item) => item.name).filter(Boolean).join('、');
+    const locationHints = locations.slice(0, 4).map((item) => item.name).filter(Boolean).join('、');
+    const atmosphere = project.visualBible?.styleProfile?.atmosphere || '待确认';
+
+    if (summaryEl) {
+        summaryEl.innerHTML = `
+            <div class="preview-summary-block">
+                <div class="preview-field">
+                    <label for="import-preview-title">项目标题</label>
+                    <input id="import-preview-title" type="text" value="${escapeAttribute(project.title || '')}" placeholder="输入项目标题" />
+                </div>
+                <div class="preview-field">
+                    <label for="import-preview-summary-input">剧情摘要</label>
+                    <textarea id="import-preview-summary-input" rows="6" placeholder="补充导入项目的剧情摘要">${escapeHtml(summary)}</textarea>
+                </div>
+                <div class="preview-meta-row">
+                    <div class="preview-field">
+                        <label>改编模式</label>
+                        <input type="text" value="${escapeAttribute(project.adaptationMode || 'balanced')}" disabled />
+                    </div>
+                    <div class="preview-field">
+                        <label>主要地点</label>
+                        <input type="text" value="${escapeAttribute(locationNames || '待补充')}" disabled />
+                    </div>
+                </div>
+                <div class="preview-content">
+                    <p>主题：${escapeHtml(themes)}</p>
+                </div>
+            </div>
+        `;
+    }
+
+    if (charactersEl) {
+        const characterItems = characters.length
+            ? characters.map((character, index) => `
+                <article class="preview-edit-item" data-preview-item="character" data-index="${index}" data-item-id="${escapeAttribute(character.id || '')}">
+                    <div class="preview-meta-row">
+                        <div class="preview-field">
+                            <label>角色名</label>
+                            <input type="text" data-field="name" value="${escapeAttribute(character.name || '')}" placeholder="角色名称" />
+                        </div>
+                        <div class="preview-field">
+                            <label>角色定位</label>
+                            <input type="text" data-field="role" value="${escapeAttribute(character.role || '')}" placeholder="主角 / 配角 / 阵营人物" />
+                        </div>
+                    </div>
+                    <div class="preview-field">
+                        <label>角色描述</label>
+                        <textarea data-field="description" rows="4" placeholder="补充角色外观、气质、动机">${escapeHtml(character.description || '')}</textarea>
+                    </div>
+                    <div class="preview-item-actions">
+                        <button type="button" class="preview-inline-btn danger" data-preview-action="remove-character">删除角色</button>
+                    </div>
+                </article>
+            `).join('')
+            : '<p class="empty-hint">暂未提取到明显角色，可以手动补一个再继续。</p>';
+
+        charactersEl.innerHTML = `
+            <div class="preview-card-header">
+                <p class="helper-text">这里只做轻量纠偏，确认后会直接带入后续生成。</p>
+                <button type="button" class="preview-inline-btn" data-preview-action="add-character">新增角色</button>
+            </div>
+            <div class="preview-edit-stack" data-preview-collection="character">
+                ${characterItems}
+            </div>
+        `;
+    }
+
+    if (chaptersEl) {
+        const chapterItems = chapters.length
+            ? chapters.map((chapter, index) => `
+                <article class="preview-edit-item" data-preview-item="chapter" data-index="${index}" data-item-id="${escapeAttribute(chapter.id || '')}">
+                    <div class="preview-field">
+                        <label>章节标题</label>
+                        <input type="text" data-field="title" value="${escapeAttribute(chapter.title || chapter.name || '')}" placeholder="章节标题" />
+                    </div>
+                    <div class="preview-field">
+                        <label>章节摘要</label>
+                        <textarea data-field="summary" rows="5" placeholder="这一章的主要事件与冲突">${escapeHtml(chapter.summary || '')}</textarea>
+                    </div>
+                    <div class="preview-item-actions">
+                        <button type="button" class="preview-inline-btn danger" data-preview-action="remove-chapter">删除章节</button>
+                    </div>
+                </article>
+            `).join('')
+            : '<p class="empty-hint">还没识别到章节结构，可以先加几个关键情节节点。</p>';
+
+        chaptersEl.innerHTML = `
+            <div class="preview-card-header">
+                <p class="helper-text">保留关键章节就够，后续工作台还会继续细化。</p>
+                <button type="button" class="preview-inline-btn" data-preview-action="add-chapter">新增章节</button>
+            </div>
+            <div class="preview-edit-stack" data-preview-collection="chapter">
+                ${chapterItems}
+            </div>
+        `;
+    }
+
+    if (visualsEl) {
+        const locationItems = locations.length
+            ? locations.map((location, index) => `
+                <article class="preview-edit-item" data-preview-item="location" data-index="${index}" data-item-id="${escapeAttribute(location.id || '')}">
+                    <div class="preview-field">
+                        <label>地点名称</label>
+                        <input type="text" data-field="name" value="${escapeAttribute(location.name || '')}" placeholder="地点名称" />
+                    </div>
+                    <div class="preview-field">
+                        <label>地点描述</label>
+                        <textarea data-field="description" rows="4" placeholder="地点外观、氛围、功能">${escapeHtml(location.description || '')}</textarea>
+                    </div>
+                    <div class="preview-item-actions">
+                        <button type="button" class="preview-inline-btn danger" data-preview-action="remove-location">删除地点</button>
+                    </div>
+                </article>
+            `).join('')
+            : '<p class="empty-hint">地点越准，后面的场景基准图就越稳。</p>';
+
+        visualsEl.innerHTML = `
+            <div class="preview-card-header">
+                <p class="helper-text">先确认后续要做视觉建档的主要地点。</p>
+                <button type="button" class="preview-inline-btn" data-preview-action="add-location">新增地点</button>
+            </div>
+            <div class="preview-edit-stack" data-preview-collection="location">
+                ${locationItems}
+            </div>
+            <div class="preview-content">
+                <p>角色基准图建议：${escapeHtml(characterHints || '先确认角色后再生成')}</p>
+                <p>场景基准图建议：${escapeHtml(locationHints || '先确认地点后再生成')}</p>
+                <p>视觉氛围：${escapeHtml(atmosphere)}</p>
+            </div>
+        `;
+    }
+}
+
+async function saveImportedProjectEdits(options = {}) {
+    if (!state.currentProjectId) {
+        setImportPreviewStatus('当前没有可保存的导入项目，请重新导入。', 'error');
+        return null;
+    }
+
+    const showStatus = options.showStatus !== false;
+    if (showStatus) {
+        setImportPreviewStatus('正在保存导入项目修改...', 'pending');
+    }
+
+    try {
+        const result = await requestJson(
+            `/projects/${state.currentProjectId}/update`,
+            createJsonRequest('POST', { edits: collectImportedProjectEdits() })
+        );
+
+        state.currentProjectData = result.project || state.currentProjectData;
+        if (state.currentProjectData) {
+            document.getElementById('import-title').value = state.currentProjectData.title || '';
+        }
+
+        renderImportedProjectPreview(state.currentProjectData);
+
+        if (showStatus) {
+            setImportPreviewStatus(options.successMessage || '导入项目修改已保存。', 'success');
+        }
+
+        return state.currentProjectData;
+    } catch (error) {
+        console.error('Save imported project edits error:', error);
+        if (showStatus) {
+            setImportPreviewStatus(error.message, 'error');
+        }
+        return null;
+    }
+}
+
+async function initImportedProjectGenerationSession() {
+    const content = document.getElementById('import-content')?.value.trim() || '';
+    if (!content) {
+        setImportStatus('请先粘贴要导入的长文本内容。', 'error');
+        return;
+    }
+
+    const generationConfig = normalizeGenerationConfig(collectGenerationConfig());
+    state.currentGenerationConfig = generationConfig;
+    saveGenerationSettings();
+    setImportStatus('正在解析长文本并创建项目...', 'pending');
+
+    try {
+        const importPayload = {
+            title: document.getElementById('import-title')?.value.trim() || '',
+            content,
+            gameType: document.getElementById('import-game-type')?.value || 'custom',
+            adaptationMode: document.getElementById('adaptation-mode')?.value || 'balanced'
+        };
+        const imported = await requestJson('/projects/import-text', createJsonRequest('POST', importPayload));
+        state.currentProjectId = imported.project?.id || null;
+        state.currentProjectData = imported.project || null;
+        state.currentGameType = importPayload.gameType;
+        renderImportedProjectPreview(imported.project);
+        setImportStatus('导入成功，请先检查提取结果，再决定是否进入工作台。', 'success');
+        setImportPreviewStatus('可以先轻量修改角色、章节和地点，再确认进入工作台。');
+        showScreen('import-preview-screen');
+    } catch (error) {
+        console.error('Imported project init error:', error);
+        setImportStatus(error.message, 'error');
+    }
+}
+
+async function startImportedProjectSession() {
+    if (!state.currentProjectId) {
+        setImportStatus('当前没有可用的导入项目，请重新导入。', 'error');
+        showScreen('import-screen');
+        return;
+    }
+
+    const generationConfig = normalizeGenerationConfig(collectGenerationConfig());
+    state.currentGenerationConfig = generationConfig;
+    saveGenerationSettings();
+
+    try {
+        const savedProject = await saveImportedProjectEdits({
+            successMessage: '修改已保存，正在进入生成工作台...'
+        });
+
+        if (!savedProject) {
+            return;
+        }
+
+        const sessionData = await requestJson(
+            `/projects/${state.currentProjectId}/init-session`,
+            createJsonRequest('POST', {
+                config: generationConfig,
+                gameType: savedProject.gameType || state.currentGameType || 'custom',
+                userInput: savedProject.storyBible?.summary || savedProject.source?.excerpt || ''
+            })
+        );
+
+        await beginGenerationWorkbench(sessionData);
+        setImportStatus('导入项目已进入生成工作台。', 'success');
+    } catch (error) {
+        console.error('Start imported project session error:', error);
+        setImportStatus(error.message, 'error');
+        setImportPreviewStatus(error.message, 'error');
+        showScreen('import-screen');
     }
 }
 
@@ -1636,6 +2215,7 @@ function renderGameStateLegacy(gameState = state.gameState) {
     }
 
     state.gameState = gameState;
+    state.currentVisualSignature = gameState.visualState?.signature || state.currentVisualSignature;
     document.getElementById('game-title').textContent = gameState.name || 'AI 生成 RPG';
     document.getElementById('scene-description').textContent = gameState.sceneDescription || '';
     const storyCopy = document.getElementById('scene-story-copy');
@@ -1859,6 +2439,8 @@ function renderSceneImages(images = [], prompt = '') {
     }
 
     if (!state.sceneImages.length) {
+        state.activeSceneImage = '';
+        state.transitioningSceneImage = '';
         imageContainer.innerHTML = '<div class="placeholder">场景图像将在这里显示</div>';
         gallery.innerHTML = '';
         syncSceneImageControls();
@@ -1866,7 +2448,7 @@ function renderSceneImages(images = [], prompt = '') {
     }
 
     const activeImage = state.sceneImages[state.selectedSceneImageIndex] || state.sceneImages[0];
-    imageContainer.innerHTML = `<img src="${activeImage}" alt="Scene image" />`;
+    renderSceneImageStage(activeImage);
 
     gallery.innerHTML = state.sceneImages
         .map((src, index) => `
@@ -1884,6 +2466,87 @@ function renderSceneImages(images = [], prompt = '') {
     });
 
     syncSceneImageControls();
+}
+
+function renderSceneImageStage(nextImage) {
+    const imageContainer = document.getElementById('scene-image');
+
+    if (!imageContainer) {
+        return;
+    }
+
+    if (!nextImage) {
+        state.activeSceneImage = '';
+        state.transitioningSceneImage = '';
+        imageContainer.innerHTML = '<div class="placeholder">场景图像将在这里显示</div>';
+        return;
+    }
+
+    if (!state.activeSceneImage || state.activeSceneImage === nextImage) {
+        state.sceneImageTransitionToken += 1;
+        state.activeSceneImage = nextImage;
+        state.transitioningSceneImage = '';
+        imageContainer.innerHTML = `
+            <div class="scene-image-layer is-active">
+                <img src="${nextImage}" alt="Scene image" />
+            </div>
+        `;
+        return;
+    }
+
+    const transitionToken = state.sceneImageTransitionToken + 1;
+    state.sceneImageTransitionToken = transitionToken;
+    state.transitioningSceneImage = nextImage;
+
+    const preloadImage = new Image();
+    preloadImage.decoding = 'async';
+    preloadImage.onload = () => {
+        if (state.sceneImageTransitionToken !== transitionToken) {
+            return;
+        }
+
+        imageContainer.innerHTML = `
+            <div class="scene-image-layer scene-image-layer-back is-active">
+                <img src="${state.activeSceneImage}" alt="Current scene image" />
+            </div>
+            <div class="scene-image-layer scene-image-layer-front">
+                <img src="${nextImage}" alt="Next scene image" />
+            </div>
+        `;
+
+        const frontLayer = imageContainer.querySelector('.scene-image-layer-front');
+        requestAnimationFrame(() => {
+            frontLayer?.classList.add('is-active');
+        });
+
+        window.setTimeout(() => {
+            if (state.sceneImageTransitionToken !== transitionToken) {
+                return;
+            }
+
+            state.activeSceneImage = nextImage;
+            state.transitioningSceneImage = '';
+            imageContainer.innerHTML = `
+                <div class="scene-image-layer is-active">
+                    <img src="${nextImage}" alt="Scene image" />
+                </div>
+            `;
+        }, 420);
+    };
+    preloadImage.onerror = () => {
+        if (state.sceneImageTransitionToken !== transitionToken) {
+            return;
+        }
+
+        state.activeSceneImage = nextImage;
+        state.transitioningSceneImage = '';
+        imageContainer.innerHTML = `
+            <div class="scene-image-layer is-active">
+                <img src="${nextImage}" alt="Scene image" />
+            </div>
+        `;
+    };
+    preloadImage.src = nextImage;
 }
 
 async function refreshComfyUIOptions(showStatus = true) {
@@ -2228,6 +2891,9 @@ async function startGame(gameId) {
         state.gameState = data.gameState;
         state.sceneImages = [];
         state.selectedSceneImageIndex = 0;
+        state.activeSceneImage = '';
+        state.transitioningSceneImage = '';
+        state.currentVisualSignature = data.gameState?.visualState?.signature || '';
         showScreen('game-screen');
         renderGameState(data.gameState);
         renderSceneImages([]);
@@ -2257,16 +2923,27 @@ async function sendPlayerAction() {
     try {
         const data = await requestJson(
             `/games/${state.currentGameId}/action`,
-            createJsonRequest('POST', { action })
+            createJsonRequest('POST', {
+                action,
+                imageConfig: getEffectiveGenerationConfig().imageSource === 'comfyui'
+                    ? { ...getEffectiveGenerationConfig(), ...readLiveComfyUIConfig() }
+                    : getEffectiveGenerationConfig()
+            })
         );
 
         appendLog('narrator', data.response || '');
         renderChoices(data.choices || []);
         renderGameState(data.gameState);
+        state.currentVisualSignature = data.visualState?.signature || state.currentVisualSignature;
 
         if (data.sceneImage) {
             renderSceneImages([data.sceneImage], data.sceneDescription || data.response || '');
-            setSceneImageStatus('Image generated automatically for the latest scene.', 'success');
+            setSceneImageStatus(
+                data.sceneImageFromCache ? 'Reused cached scene image for the latest visual scene.' : 'Image generated automatically for the latest visual scene.',
+                'success'
+            );
+        } else if (data.visualSceneChanged && getEffectiveGenerationConfig().imageGenerationMode === 'auto') {
+            setSceneImageStatus('Visual scene changed, but no new image was available yet.', 'pending');
         }
     } catch (error) {
         console.error('Send player action error:', error);
@@ -2330,6 +3007,7 @@ function renderGameState(gameState = state.gameState) {
     }
 
     state.gameState = gameState;
+    state.currentVisualSignature = gameState.visualState?.signature || state.currentVisualSignature;
     document.getElementById('game-title').textContent = gameState.name || 'AI 生成 RPG';
     document.getElementById('scene-description').textContent = gameState.sceneDescription || '';
 
@@ -2362,6 +3040,12 @@ async function testConnection(source) {
     } finally {
         button.disabled = false;
     }
+}
+
+function escapeAttribute(value) {
+    return escapeHtml(value)
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
 }
 
 function escapeHtml(value) {

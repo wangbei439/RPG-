@@ -1,10 +1,11 @@
 ﻿class MemoryManager {
-    constructor(userInput, gameType) {
+    constructor(userInput, gameType, options = {}) {
         this.globalContext = {
             userInput,
             gameType,
             confirmedElements: [],
-            constraints: []
+            constraints: [],
+            sourceProject: options.sourceProject || null
         };
         this.workingMemory = {};
         this.elementStore = {
@@ -19,6 +20,10 @@
             integration: null,
             summary: ''
         };
+
+        if (options.seedData) {
+            this.seedFromData(options.seedData);
+        }
     }
 
     getCategoryForStep(stepId) {
@@ -51,6 +56,45 @@
         if (!this.globalContext.confirmedElements.includes(category)) {
             this.globalContext.confirmedElements.push(category);
         }
+
+        this.updateSummary();
+    }
+
+    seedFromData(seedData = {}) {
+        const categories = [
+            'worldview',
+            'coreCharacters',
+            'secondaryCharacters',
+            'items',
+            'puzzles',
+            'mainPlot',
+            'sidePlots',
+            'fragments',
+            'integration'
+        ];
+
+        categories.forEach((category) => {
+            const value = seedData[category];
+            if (value == null) {
+                return;
+            }
+
+            const hasContent = Array.isArray(value)
+                ? value.length > 0
+                : typeof value === 'object'
+                    ? Object.keys(value).length > 0
+                    : Boolean(value);
+
+            if (!hasContent) {
+                return;
+            }
+
+            this.elementStore[category] = JSON.parse(JSON.stringify(value));
+
+            if (!this.globalContext.confirmedElements.includes(category)) {
+                this.globalContext.confirmedElements.push(category);
+            }
+        });
 
         this.updateSummary();
     }
@@ -241,7 +285,8 @@
             gameplayDesign: integration.gameplayDesign || '',
             balancingNotes: integration.balancingNotes || '',
             gameSystems: integration.gameSystems || {},
-            openingScene: integration.openingScene || {}
+            openingScene: integration.openingScene || {},
+            sourceProject: this.globalContext.sourceProject || null
         };
     }
 
