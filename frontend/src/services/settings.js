@@ -123,3 +123,12 @@ export function applyGenerationConfig(config = {}, doc = document) {
         writeField(field, config[key] ?? field.fallback, doc);
     }
 }
+
+export function normalizeGenerationConfig(config = {}) {
+    const normalized = {};
+    for (const [key, field] of Object.entries(GENERATION_FIELDS)) {
+        normalized[key] = config[key] ?? field.fallback;
+    }
+    if (config.settings) normalized.settings = config.settings;
+    return normalized;
+}

@@ -1,4 +1,8 @@
 ﻿const LLMService = require('../utils/LLMService');
+const EnhancedMemoryManager = require('./EnhancedMemoryManager');
+const ConsistencyValidator = require('./ConsistencyValidator');
+const ContextCompressor = require('./ContextCompressor');
+const PredictiveEngine = require('./PredictiveEngine');
 
 class GameEngine {
     constructor(gameData, config, services = {}) {
@@ -9,11 +13,30 @@ class GameEngine {
         this.gameId = services.gameId || gameData?.id || null;
         this.memoryService = services.memoryService || null;
         this.memoryBootstrapped = false;
+
+        // 新增：增强记忆系统
+        this.enhancedMemory = new EnhancedMemoryManager(
+            gameData?.name || '未命名游戏',
+            gameData?.type || 'custom',
+            { seedData: gameData }
+        );
+
+        // 新增：一致性验证器
+        this.validator = new ConsistencyValidator(this.enhancedMemory);
+        this.validator.initializeDefaultRules();
+
+        // 新增：上下文压缩器
+        this.compressor = new ContextCompressor(this.enhancedMemory);
+
+        // 新增：预测引擎
+        this.predictiveEngine = new PredictiveEngine(this);
     }
 
     async restore(state) {
-        this.llm.initialize(this.config?.settings || {});
-        this.state = state ? JSON.parse(JSON.stringify(state)) : null;
+        if (this.config?.settings?.llmSource) {
+            this.llm.initialize(this.config.settings);
+        }
+        this.state = await this.normalizeRestoredState(state);
         if (this.state) {
             this.state.visualDirectives = this.state.visualDirectives || this.buildVisualDirectives({});
             this.state.visualState = this.buildVisualState();
@@ -23,11 +46,25 @@ class GameEngine {
     }
 
     async start() {
-        this.llm.initialize(this.config?.settings || {});
+        if (this.config?.settings?.llmSource) {
+            this.llm.initialize(this.config.settings);
+        }
+        this.state = this.createInitialState();
+        this.state.visualDirectives = this.buildVisualDirectives({});
+        this.state.visualState = this.buildVisualState();
+
+        // 初始化增强记忆系统
+        this.enhancedMemory.initializeFromGameData(this.gameData);
+
+        await this.ensureMemoryBootstrap();
+        return this.state;
+    }
+
+    createInitialState() {
         const opening = this.gameData.openingScene || {};
         const firstChapter = this.gameData.chapters?.[0] || {};
 
-        this.state = {
+        return {
             id: this.gameData.id,
             name: this.gameData.name,
             currentChapter: 0,
@@ -62,11 +99,68 @@ class GameEngine {
             visualDirectives: null,
             visualState: null
         };
-        this.state.visualDirectives = this.buildVisualDirectives({});
-        this.state.visualState = this.buildVisualState();
+    }
 
-        await this.ensureMemoryBootstrap();
-        return this.state;
+    async normalizeRestoredState(state) {
+        if (!state || typeof state !== 'object') {
+            return null;
+        }
+
+        if (state.player || state.playerState) {
+            const nextState = this.createInitialState();
+            const snapshot = JSON.parse(JSON.stringify(state));
+
+            if (snapshot.player) {
+                return {
+                    ...nextState,
+                    ...snapshot,
+                    player: {
+                        ...nextState.player,
+                        ...(snapshot.player || {})
+                    },
+                    worldState: {
+                        ...nextState.worldState,
+                        ...(snapshot.worldState || {})
+                    },
+                    inventory: Array.isArray(snapshot.inventory) ? snapshot.inventory : nextState.inventory,
+                    quests: Array.isArray(snapshot.quests)
+                        ? snapshot.quests
+                        : Array.isArray(snapshot.activeQuests)
+                            ? snapshot.activeQuests
+                            : nextState.quests,
+                    characterStates: Array.isArray(snapshot.characterStates)
+                        ? snapshot.characterStates
+                        : Array.isArray(snapshot.relationshipState)
+                            ? snapshot.relationshipState
+                            : nextState.characterStates,
+                    history: Array.isArray(snapshot.history) ? snapshot.history : nextState.history
+                };
+            }
+
+            return {
+                ...nextState,
+                currentChapter: snapshot.chapterId ?? nextState.currentChapter,
+                currentScene: snapshot.sceneNodeId || nextState.currentScene,
+                turn: snapshot.plotBeatId ?? nextState.turn,
+                player: {
+                    ...nextState.player,
+                    ...(snapshot.playerState || {})
+                },
+                worldState: {
+                    ...nextState.worldState,
+                    ...(snapshot.worldState || {})
+                },
+                inventory: Array.isArray(snapshot.inventory) ? snapshot.inventory : nextState.inventory,
+                quests: Array.isArray(snapshot.activeQuests) ? snapshot.activeQuests : nextState.quests,
+                characterStates: Array.isArray(snapshot.relationshipState)
+                    ? snapshot.relationshipState
+                    : nextState.characterStates,
+                visualState: snapshot.visualState || null,
+                history: Array.isArray(snapshot.history) ? snapshot.history : nextState.history
+            };
+        }
+
+        return JSON.parse(JSON.stringify(state));
     }
 
     async processAction(action) {
@@ -77,22 +171,56 @@ class GameEngine {
         this.state.turn += 1;
         this.state.history.push({ turn: this.state.turn, action });
 
+        // 更新工作记忆
+        this.enhancedMemory.updateWorkingMemory({
+            turn: this.state.turn,
+            action,
+            location: this.state.player.location,
+            activeCharacters: this.getActiveCharacters()
+        });
+
         const previousVisualState = this.cloneVisualState(this.state.visualState);
-        const context = await this.buildContext(action);
-        const prompt = this.buildGamePrompt(context, action);
+        const context = await this.buildEnhancedContext(action);
+
+        // 使用智能压缩
+        const compressedContext = this.compressor.compressContext(context, {
+            maxTokens: 4000,
+            priorityLevel: 'balanced'
+        });
+
+        const prompt = this.buildGamePrompt(compressedContext, action);
         const result = await this.llm.generateJSON(prompt);
 
+        // 一致性验证
+        const validation = this.validator.validate(result, context);
+        if (!validation.isValid && validation.errors.length > 0) {
+            console.warn('一致性验证失败:', validation.errors);
+            // 可以选择重新生成或修正
+        }
+
         this.updateState(result);
+
+        // 更新语义记忆
+        this.updateSemanticMemory(action, result);
+
         this.state.visualState = this.buildVisualState();
 
         const choices = Array.isArray(result.choices) ? result.choices : [];
         const response = result.narration || result.response || '故事继续推进。';
         const visualSceneChanged = this.hasVisualSceneChanged(previousVisualState, this.state.visualState);
         this.updateLatestHistoryEntry(response);
+
         await Promise.all([
             this.persistTurnMemory(action, response, result),
             this.maybePersistTurnSummary(response, result)
         ]);
+
+        // 预生成下一步选项
+        if (choices.length > 0) {
+            this.predictiveEngine.pregenerateChoices(this.state, choices).catch(err => {
+                console.error('预生成失败:', err);
+            });
+        }
 
         return {
             response,
@@ -103,8 +231,125 @@ class GameEngine {
             visualSceneChanged,
             gameOver: this.state.gameOver,
             gameOverMessage: this.state.gameOverMessage,
-            recalledMemories: context.recalledMemories || []
+            recalledMemories: context.recalledMemories || [],
+            validation: validation.isValid ? null : validation
         };
+    }
+
+    /**
+     * 流式处理动作（新增）
+     */
+    async processActionStreaming(action, onChunk) {
+        if (this.state.gameOver) {
+            onChunk({ type: 'complete', response: '游戏已经结束。', gameState: this.state });
+            return;
+        }
+
+        this.state.turn += 1;
+        this.state.history.push({ turn: this.state.turn, action });
+
+        // 检查是否有预生成的结果
+        const predicted = this.predictiveEngine.getPrediction(action);
+        if (predicted) {
+            console.log('使用预生成结果');
+            // 直接返回预生成的结果（模拟流式输出）
+            const response = predicted.response;
+            for (let i = 0; i < response.length; i += 10) {
+                onChunk({
+                    type: 'narration',
+                    text: response.slice(i, i + 10),
+                    complete: false
+                });
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+            onChunk({
+                type: 'complete',
+                choices: predicted.choices,
+                gameState: predicted.gameState
+            });
+            this.state = predicted.gameState;
+            return;
+        }
+
+        // 更新工作记忆
+        this.enhancedMemory.updateWorkingMemory({
+            turn: this.state.turn,
+            action,
+            location: this.state.player.location,
+            activeCharacters: this.getActiveCharacters()
+        });
+
+        const previousVisualState = this.cloneVisualState(this.state.visualState);
+        const context = await this.buildEnhancedContext(action);
+
+        // 使用智能压缩
+        const compressedContext = this.compressor.compressContext(context, {
+            maxTokens: 4000,
+            priorityLevel: 'balanced'
+        });
+
+        const prompt = this.buildGamePrompt(compressedContext, action);
+
+        let fullResult = null;
+
+        // 流式生成
+        await this.llm.generateJSONStreaming(prompt, (partialResult) => {
+            if (partialResult.narration) {
+                onChunk({
+                    type: 'narration',
+                    text: partialResult.narration,
+                    complete: false
+                });
+            }
+            fullResult = partialResult;
+        });
+
+        if (!fullResult) {
+            throw new Error('流式生成失败');
+        }
+
+        // 一致性验证
+        const validation = this.validator.validate(fullResult, context);
+        if (!validation.isValid && validation.errors.length > 0) {
+            console.warn('一致性验证失败:', validation.errors);
+        }
+
+        this.updateState(fullResult);
+
+        // 更新语义记忆
+        this.updateSemanticMemory(action, fullResult);
+
+        this.state.visualState = this.buildVisualState();
+
+        const choices = Array.isArray(fullResult.choices) ? fullResult.choices : [];
+        const response = fullResult.narration || fullResult.response || '故事继续推进。';
+        const visualSceneChanged = this.hasVisualSceneChanged(previousVisualState, this.state.visualState);
+        this.updateLatestHistoryEntry(response);
+
+        await Promise.all([
+            this.persistTurnMemory(action, response, fullResult),
+            this.maybePersistTurnSummary(response, fullResult)
+        ]);
+
+        // 预生成下一步选项
+        if (choices.length > 0) {
+            this.predictiveEngine.pregenerateChoices(this.state, choices).catch(err => {
+                console.error('预生成失败:', err);
+            });
+        }
+
+        // 发送完成信号
+        onChunk({
+            type: 'complete',
+            choices,
+            gameState: this.state,
+            sceneDescription: this.state.sceneDescription,
+            visualState: this.state.visualState,
+            visualSceneChanged,
+            gameOver: this.state.gameOver,
+            gameOverMessage: this.state.gameOverMessage,
+            validation: validation.isValid ? null : validation
+        });
     }
 
     async buildContext(action) {
@@ -131,6 +376,139 @@ class GameEngine {
             recalledMemories,
             graphFacts
         };
+    }
+
+    /**
+     * 构建增强上下文（使用增强记忆系统）
+     */
+    async buildEnhancedContext(action) {
+        const basicContext = await this.buildContext(action);
+
+        // 从增强记忆系统获取额外信息
+        const enhancedContext = this.enhancedMemory.buildContext(action, {
+            maxRecentEvents: 10,
+            maxRelevantEvents: 5,
+            includeGraph: true
+        });
+
+        return {
+            ...basicContext,
+            ...enhancedContext,
+            activeCharacters: this.getActiveCharacters(),
+            currentLocation: this.state.player.location,
+            sceneDescription: this.state.sceneDescription
+        };
+    }
+
+    /**
+     * 获取当前活跃角色
+     */
+    getActiveCharacters() {
+        // 简单实现：返回最近互动的角色
+        const recentHistory = this.state.history.slice(-5);
+        const activeChars = new Set();
+
+        for (const entry of recentHistory) {
+            // 从历史记录中提取角色ID（简化版）
+            if (entry.characters) {
+                entry.characters.forEach(c => activeChars.add(c));
+            }
+        }
+
+        return Array.from(activeChars);
+    }
+
+    /**
+     * 更新语义记忆
+     */
+    updateSemanticMemory(action, result) {
+        // 添加事件到时间线
+        this.enhancedMemory.updateSemanticMemory({
+            event: {
+                turn: this.state.turn,
+                chapter: this.state.currentChapter,
+                type: this.classifyEventType(action, result),
+                summary: `${action} -> ${result.narration?.slice(0, 100)}`,
+                participants: this.getActiveCharacters(),
+                location: this.state.player.location,
+                importance: this.calculateImportance(result),
+                consequences: result.consequences || []
+            }
+        });
+
+        // 更新因果链
+        if (result.cause && result.effect) {
+            this.enhancedMemory.updateSemanticMemory({
+                causal: {
+                    cause: result.cause,
+                    effect: result.effect,
+                    options: { strength: result.causalStrength || 5 }
+                }
+            });
+        }
+
+        // 更新角色关系
+        if (result.relationshipChange) {
+            this.enhancedMemory.updateSemanticMemory({
+                relation: {
+                    from: result.relationshipChange.from,
+                    to: result.relationshipChange.to,
+                    type: result.relationshipChange.type,
+                    properties: { strength: result.relationshipChange.strength }
+                }
+            });
+        }
+    }
+
+    /**
+     * 分类事件类型
+     */
+    classifyEventType(action, result) {
+        const actionLower = action.toLowerCase();
+
+        if (actionLower.includes('说') || actionLower.includes('问') || actionLower.includes('回答')) {
+            return 'dialogue';
+        }
+        if (actionLower.includes('发现') || actionLower.includes('找到')) {
+            return 'discovery';
+        }
+        if (actionLower.includes('战斗') || actionLower.includes('攻击') || actionLower.includes('打')) {
+            return 'conflict';
+        }
+        if (result.questUpdates && result.questUpdates.length > 0) {
+            return 'resolution';
+        }
+
+        return 'action';
+    }
+
+    /**
+     * 计算事件重要性
+     */
+    calculateImportance(result) {
+        let importance = 3; // 默认
+
+        // 任务相关 +1
+        if (result.questUpdates && result.questUpdates.length > 0) {
+            importance += 1;
+        }
+
+        // 角色关系变化 +1
+        if (result.relationshipChange) {
+            importance += 1;
+        }
+
+        // 重大发现 +1
+        if (result.discovery) {
+            importance += 1;
+        }
+
+        // 战斗或冲突 +1
+        if (result.conflict) {
+            importance += 1;
+        }
+
+        return Math.min(importance, 5);
     }
 
     buildGamePrompt(context, action) {

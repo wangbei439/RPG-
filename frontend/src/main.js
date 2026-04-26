@@ -1,11 +1,13 @@
-import './styles/main.css';
-import { createJsonRequest, requestJson } from './services/api.js';
+﻿import './styles/main.css';
+import { createJsonRequest, requestJson, requestJsonWithProgress } from './services/api.js';
 import {
     applyGenerationConfig,
     applyLlmSettings,
     collectGenerationConfig,
     collectLlmSettings
 } from './services/settings.js';
+
+const API_BASE = '/api';
 
 const state = {
     currentGameType: null,
@@ -25,7 +27,9 @@ const state = {
     activeSceneImage: '',
     transitioningSceneImage: '',
     currentVisualSignature: '',
-    sceneImageTransitionToken: 0
+    sceneImageTransitionToken: 0,
+    runtimeSnapshotTimer: null,
+    runtimeSnapshotSaving: false
 };
 
 const LLM_SETTINGS_KEY = 'rpg_generator_settings';
@@ -42,6 +46,18 @@ const gameTypeNames = {
     kingdom: '王国建设',
     cultivation: '修仙问道',
     custom: '自定义 RPG'
+};
+
+const adaptationModeNames = {
+    faithful: '忠于原著',
+    balanced: '平衡改编',
+    free: '高自由互动'
+};
+
+const pacingNames = {
+    slow: '慢节奏',
+    balanced: '平衡',
+    fast: '快节奏'
 };
 
 const stepDescriptions = {
@@ -65,6 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initImportPreviewEditor();
     initWorkbench();
     initGameScreen();
+    initHeroSection();
     loadSettings();
 });
 
@@ -133,63 +150,63 @@ function initializeComfyUiPanel() {
 
     container.innerHTML = `
         <div class="sub-config-row">
-            <input type="text" id="comfyui-url" data-generation-setting="true" placeholder="ComfyUI URL (default: http://127.0.0.1:8000)" value="http://127.0.0.1:8000" />
-            <button type="button" id="refresh-comfyui-btn" class="test-btn">Refresh models</button>
-            <button type="button" id="test-comfyui-btn" class="test-btn">Test connection</button>
+            <input type="text" id="comfyui-url" data-generation-setting="true" placeholder="ComfyUI 地址（默认：http://127.0.0.1:8000）" value="http://127.0.0.1:8000" />
+            <button type="button" id="refresh-comfyui-btn" class="test-btn">刷新模型</button>
+            <button type="button" id="test-comfyui-btn" class="test-btn">测试连接</button>
         </div>
         <div class="sub-config-grid">
             <div>
-                <label for="image-generation-mode">Image generation mode</label>
+                <label for="image-generation-mode">生图模式</label>
                 <select id="image-generation-mode" data-generation-setting="true">
-                    <option value="manual">Manual button</option>
-                    <option value="auto">Auto after each action</option>
+                    <option value="manual">手动点击生成</option>
+                    <option value="auto">每次行动后自动生成</option>
                 </select>
             </div>
             <div>
-                <label for="comfyui-image-count">Image count</label>
+                <label for="comfyui-image-count">出图数量</label>
                 <input type="number" id="comfyui-image-count" data-generation-setting="true" value="1" min="1" max="8" />
             </div>
             <div>
-                <label for="comfyui-workflow-mode">Workflow</label>
+                <label for="comfyui-workflow-mode">工作流模式</label>
                 <select id="comfyui-workflow-mode" data-generation-setting="true">
-                    <option value="custom">Custom JSON</option>
-                    <option value="default">Default template</option>
+                    <option value="custom">自定义 JSON</option>
+                    <option value="default">默认模板</option>
                 </select>
             </div>
         </div>
         <div class="helper-text">
-            Recommended: keep this on <strong>Custom JSON</strong>. We only inject the prompt and image count into your existing ComfyUI workflow.
+            建议优先使用 <strong>自定义 JSON</strong>。系统只会把提示词和出图数量注入到你现有的 ComfyUI 工作流里。
         </div>
         <div id="comfyui-default-workflow-fields" style="display:none">
             <div class="sub-config-grid">
                 <div>
-                    <label for="comfyui-model">Checkpoint</label>
+                    <label for="comfyui-model">模型检查点</label>
                     <select id="comfyui-model" data-generation-setting="true">
-                        <option value="">Refresh to load models</option>
+                        <option value="">刷新后加载模型</option>
                     </select>
                 </div>
                 <div>
-                    <label for="comfyui-sampler">Sampler</label>
+                    <label for="comfyui-sampler">采样器</label>
                     <select id="comfyui-sampler" data-generation-setting="true">
                         <option value="euler">euler</option>
                     </select>
                 </div>
                 <div>
-                    <label for="comfyui-scheduler">Scheduler</label>
+                    <label for="comfyui-scheduler">调度器</label>
                     <select id="comfyui-scheduler" data-generation-setting="true">
-                        <option value="normal">normal</option>
+                        <option value="normal">标准</option>
                     </select>
                 </div>
                 <div>
-                    <label for="comfyui-width">Width</label>
+                    <label for="comfyui-width">宽度</label>
                     <input type="number" id="comfyui-width" data-generation-setting="true" value="768" min="256" max="2048" step="64" />
                 </div>
                 <div>
-                    <label for="comfyui-height">Height</label>
+                    <label for="comfyui-height">高度</label>
                     <input type="number" id="comfyui-height" data-generation-setting="true" value="512" min="256" max="2048" step="64" />
                 </div>
                 <div>
-                    <label for="comfyui-steps">Steps</label>
+                    <label for="comfyui-steps">采样步数</label>
                     <input type="number" id="comfyui-steps" data-generation-setting="true" value="20" min="1" max="150" />
                 </div>
                 <div>
@@ -197,52 +214,52 @@ function initializeComfyUiPanel() {
                     <input type="number" id="comfyui-cfg" data-generation-setting="true" value="7.5" min="0.1" max="30" step="0.1" />
                 </div>
                 <div>
-                    <label for="comfyui-seed">Seed</label>
+                    <label for="comfyui-seed">随机种子</label>
                     <input type="number" id="comfyui-seed" data-generation-setting="true" value="-1" />
                 </div>
             </div>
         </div>
         <div class="sub-config-grid">
             <div>
-                <label for="comfyui-timeout-ms">Timeout (ms)</label>
+                <label for="comfyui-timeout-ms">超时时间（毫秒）</label>
                 <input type="number" id="comfyui-timeout-ms" data-generation-setting="true" value="180000" min="5000" step="1000" />
             </div>
             <div>
-                <label for="comfyui-filename-prefix">Filename prefix</label>
-                <input type="text" id="comfyui-filename-prefix" data-generation-setting="true" placeholder="Filename prefix" value="rpg_scene" />
+                <label for="comfyui-filename-prefix">文件名前缀</label>
+                <input type="text" id="comfyui-filename-prefix" data-generation-setting="true" placeholder="输出文件名前缀" value="rpg_scene" />
             </div>
         </div>
         <div id="comfyui-custom-workflow">
             <div class="sub-config-row">
                 <select id="comfyui-workflow-file" data-generation-setting="true">
-                    <option value="">Select a workflow file from G:\\comfy\\wenjian\\user\\default\\workflows</option>
+                    <option value="">从工作流目录中选择文件</option>
                 </select>
-                <button type="button" id="refresh-workflow-files-btn" class="test-btn">Refresh workflows</button>
-                <button type="button" id="load-workflow-file-btn" class="test-btn">Load selected</button>
+                <button type="button" id="refresh-workflow-files-btn" class="test-btn">刷新工作流</button>
+                <button type="button" id="load-workflow-file-btn" class="test-btn">载入所选文件</button>
             </div>
-            <textarea id="comfyui-workflow-json" data-generation-setting="true" rows="10" placeholder="Paste a ComfyUI workflow JSON here. If your workflow already contains CLIPTextEncode text nodes, the backend will inject the current prompt automatically. You can also use placeholders like {{prompt}}, {{raw_prompt}}, {{negative_prompt}}, {{batch_size}}, {{ckpt_name}}."></textarea>
+            <textarea id="comfyui-workflow-json" data-generation-setting="true" rows="10" placeholder="在这里粘贴 ComfyUI 工作流 JSON。如果你的工作流已经带有 CLIPTextEncode 文本节点，后端会自动注入当前提示词。你也可以使用 {{prompt}}、{{raw_prompt}}、{{negative_prompt}}、{{batch_size}}、{{ckpt_name}} 等占位符。"></textarea>
             <div class="sub-config-actions">
-                <button type="button" id="validate-workflow-btn" class="test-btn">Validate workflow</button>
+                <button type="button" id="validate-workflow-btn" class="test-btn">校验工作流</button>
             </div>
         </div>
         <details id="comfyui-prompt-overrides">
-            <summary>Optional prompt helpers</summary>
+            <summary>提示词辅助项</summary>
             <div class="sub-config-grid">
                 <div>
-                    <label for="comfyui-prompt-prefix">Prompt prefix</label>
-                    <input type="text" id="comfyui-prompt-prefix" data-generation-setting="true" placeholder="Positive prefix" value="RPG game scene" />
+                    <label for="comfyui-prompt-prefix">正向前缀</label>
+                    <input type="text" id="comfyui-prompt-prefix" data-generation-setting="true" placeholder="例如：国风互动叙事场景" value="中文互动叙事场景" />
                 </div>
                 <div>
-                    <label for="comfyui-prompt-suffix">Prompt suffix</label>
-                    <input type="text" id="comfyui-prompt-suffix" data-generation-setting="true" placeholder="Positive suffix" value="high quality, detailed, fantasy art style" />
+                    <label for="comfyui-prompt-suffix">正向后缀</label>
+                    <input type="text" id="comfyui-prompt-suffix" data-generation-setting="true" placeholder="例如：高质量、细节丰富、电影感插画" value="高质量，细节丰富，电影感插画" />
                 </div>
                 <div>
-                    <label for="comfyui-negative-prompt">Negative prompt</label>
-                    <input type="text" id="comfyui-negative-prompt" data-generation-setting="true" placeholder="Negative prompt" value="low quality, blurry, deformed, ugly, bad anatomy, watermark, text" />
+                    <label for="comfyui-negative-prompt">反向提示词</label>
+                    <input type="text" id="comfyui-negative-prompt" data-generation-setting="true" placeholder="不希望出现的内容" value="低质量，模糊，畸形，崩坏人体，水印，文字" />
                 </div>
             </div>
         </details>
-        <div id="comfyui-status" class="helper-text">ComfyUI settings have not been checked yet.</div>
+        <div id="comfyui-status" class="helper-text">尚未检查 ComfyUI 配置。</div>
     `;
 
     container.dataset.enhanced = 'true';
@@ -258,54 +275,54 @@ function initializeLiveImageConfigPanel() {
         <div class="live-image-config-card">
             <div class="sub-config-row">
                 <select id="live-comfyui-model">
-                    <option value="">Select model</option>
+                    <option value="">选择模型</option>
                 </select>
                 <select id="live-comfyui-workflow-file">
-                    <option value="">Select workflow file</option>
+                    <option value="">选择工作流文件</option>
                 </select>
-                <button type="button" id="live-load-workflow-btn" class="test-btn">Load workflow</button>
+                <button type="button" id="live-load-workflow-btn" class="test-btn">载入工作流</button>
             </div>
             <div class="sub-config-row">
-                <button type="button" id="live-refresh-comfyui-btn" class="test-btn">Refresh models</button>
-                <button type="button" id="live-refresh-workflow-files-btn" class="test-btn">Refresh workflows</button>
-                <button type="button" id="live-test-comfyui-btn" class="test-btn">Test ComfyUI</button>
+                <button type="button" id="live-refresh-comfyui-btn" class="test-btn">刷新模型</button>
+                <button type="button" id="live-refresh-workflow-files-btn" class="test-btn">刷新工作流</button>
+                <button type="button" id="live-test-comfyui-btn" class="test-btn">测试 ComfyUI</button>
             </div>
             <details id="live-comfyui-settings">
-                <summary>ComfyUI live settings</summary>
+                <summary>ComfyUI 实时配置</summary>
                 <div class="sub-config-grid" style="margin-top:0.75rem">
                     <div>
-                        <label for="live-comfyui-url">ComfyUI URL</label>
+                        <label for="live-comfyui-url">ComfyUI 地址</label>
                         <input type="text" id="live-comfyui-url" value="http://127.0.0.1:8000" />
                     </div>
                     <div>
-                        <label for="live-comfyui-workflow-mode">Workflow mode</label>
+                        <label for="live-comfyui-workflow-mode">工作流模式</label>
                         <select id="live-comfyui-workflow-mode">
-                            <option value="custom">Custom workflow</option>
-                            <option value="default">Default template</option>
+                            <option value="custom">自定义工作流</option>
+                            <option value="default">默认模板</option>
                         </select>
                     </div>
                     <div>
-                        <label for="live-comfyui-sampler">Sampler</label>
+                        <label for="live-comfyui-sampler">采样器</label>
                         <select id="live-comfyui-sampler">
                             <option value="euler">euler</option>
                         </select>
                     </div>
                     <div>
-                        <label for="live-comfyui-scheduler">Scheduler</label>
+                        <label for="live-comfyui-scheduler">调度器</label>
                         <select id="live-comfyui-scheduler">
-                            <option value="normal">normal</option>
+                            <option value="normal">标准</option>
                         </select>
                     </div>
                     <div>
-                        <label for="live-comfyui-width">Width</label>
+                        <label for="live-comfyui-width">宽度</label>
                         <input type="number" id="live-comfyui-width" value="768" min="256" max="2048" step="64" />
                     </div>
                     <div>
-                        <label for="live-comfyui-height">Height</label>
+                        <label for="live-comfyui-height">高度</label>
                         <input type="number" id="live-comfyui-height" value="512" min="256" max="2048" step="64" />
                     </div>
                     <div>
-                        <label for="live-comfyui-steps">Steps</label>
+                        <label for="live-comfyui-steps">采样步数</label>
                         <input type="number" id="live-comfyui-steps" value="20" min="1" max="150" />
                     </div>
                     <div>
@@ -313,40 +330,40 @@ function initializeLiveImageConfigPanel() {
                         <input type="number" id="live-comfyui-cfg" value="7.5" min="0.1" max="30" step="0.1" />
                     </div>
                     <div>
-                        <label for="live-comfyui-seed">Seed</label>
+                        <label for="live-comfyui-seed">随机种子</label>
                         <input type="number" id="live-comfyui-seed" value="-1" />
                     </div>
                     <div>
-                        <label for="live-comfyui-timeout-ms">Timeout (ms)</label>
+                        <label for="live-comfyui-timeout-ms">超时时间（毫秒）</label>
                         <input type="number" id="live-comfyui-timeout-ms" value="180000" min="5000" step="1000" />
                     </div>
                 </div>
                 <div class="sub-config-grid">
                     <div>
-                        <label for="live-comfyui-prompt-prefix">Prompt prefix</label>
-                        <input type="text" id="live-comfyui-prompt-prefix" value="RPG game scene" />
+                        <label for="live-comfyui-prompt-prefix">正向前缀</label>
+                        <input type="text" id="live-comfyui-prompt-prefix" value="中文互动叙事场景" />
                     </div>
                     <div>
-                        <label for="live-comfyui-prompt-suffix">Prompt suffix</label>
-                        <input type="text" id="live-comfyui-prompt-suffix" value="high quality, detailed, fantasy art style" />
+                        <label for="live-comfyui-prompt-suffix">正向后缀</label>
+                        <input type="text" id="live-comfyui-prompt-suffix" value="高质量，细节丰富，电影感插画" />
                     </div>
                     <div>
-                        <label for="live-comfyui-negative-prompt">Negative prompt</label>
-                        <input type="text" id="live-comfyui-negative-prompt" value="low quality, blurry, deformed, ugly, bad anatomy, watermark, text" />
+                        <label for="live-comfyui-negative-prompt">反向提示词</label>
+                        <input type="text" id="live-comfyui-negative-prompt" value="低质量，模糊，畸形，崩坏人体，水印，文字" />
                     </div>
                     <div>
-                        <label for="live-comfyui-filename-prefix">Filename prefix</label>
+                        <label for="live-comfyui-filename-prefix">文件名前缀</label>
                         <input type="text" id="live-comfyui-filename-prefix" value="rpg_scene" />
                     </div>
                 </div>
                 <div id="live-comfyui-custom-workflow" style="margin-top:0.75rem">
-                    <textarea id="live-comfyui-workflow-json" rows="8" placeholder="Custom workflow JSON will load here."></textarea>
+                    <textarea id="live-comfyui-workflow-json" rows="8" placeholder="这里会载入自定义工作流 JSON。"></textarea>
                     <div class="sub-config-actions">
-                        <button type="button" id="live-validate-workflow-btn" class="test-btn">Validate workflow</button>
+                        <button type="button" id="live-validate-workflow-btn" class="test-btn">校验工作流</button>
                     </div>
                 </div>
             </details>
-            <div id="live-comfyui-status" class="helper-text">API mode uses the generate button directly. Switch to ComfyUI to adjust model and workflow here.</div>
+            <div id="live-comfyui-status" class="helper-text">当前在接口出图模式下会直接调用生成按钮。切换到 ComfyUI 后，可以在这里细调模型和工作流。</div>
         </div>
     `;
 
@@ -512,12 +529,14 @@ function initNavigation() {
         });
     });
 
-    document.getElementById('back-to-home').addEventListener('click', () => showScreen('home-screen'));
-    document.getElementById('open-import-screen')?.addEventListener('click', () => {
-        setImportStatus('导入后会自动创建项目，并预填到现有生成流程中。');
-        showScreen('import-screen');
+    document.getElementById('back-to-home').addEventListener('click', () => {
+        showHomeScreen();
     });
-    document.getElementById('back-from-import')?.addEventListener('click', () => showScreen('home-screen'));
+
+    document.getElementById('back-from-import')?.addEventListener('click', () => {
+        showHomeScreen();
+    });
+
     document.getElementById('back-to-import-edit')?.addEventListener('click', () => showScreen('import-screen'));
     document.getElementById('confirm-import-preview')?.addEventListener('click', async () => {
         await startImportedProjectSession();
@@ -530,9 +549,135 @@ function initNavigation() {
         if (confirm('确定退出当前游戏吗？未保存进度将会丢失。')) {
             state.currentGameId = null;
             state.gameState = null;
-            showScreen('home-screen');
+            showHomeScreen();
         }
     });
+}
+
+function showHomeScreen() {
+    showScreen('home-screen');
+    document.getElementById('game-types-section').style.display = 'block';
+    document.getElementById('examples-section').style.display = 'none';
+}
+
+function initHeroSection() {
+    // 快速开始按钮
+    document.getElementById('quick-start-btn')?.addEventListener('click', () => {
+        document.getElementById('game-types-section').style.display = 'block';
+        document.getElementById('examples-section').style.display = 'none';
+        document.getElementById('game-types-section').scrollIntoView({ behavior: 'smooth' });
+    });
+
+    // 浏览示例按钮
+    document.getElementById('browse-examples-btn')?.addEventListener('click', async () => {
+        await loadAndRenderExamples();
+        document.getElementById('game-types-section').style.display = 'none';
+        document.getElementById('examples-section').style.display = 'block';
+        document.getElementById('examples-section').scrollIntoView({ behavior: 'smooth' });
+    });
+
+    // 导入小说按钮
+    document.getElementById('import-novel-btn')?.addEventListener('click', () => {
+        setImportStatus('导入后会自动创建项目，并预填到现有生成流程中。');
+        showScreen('import-screen');
+    });
+
+    // 关闭示例按钮
+    document.getElementById('close-examples')?.addEventListener('click', () => {
+        document.getElementById('game-types-section').style.display = 'block';
+        document.getElementById('examples-section').style.display = 'none';
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+}
+
+async function loadAndRenderExamples() {
+    const grid = document.getElementById('examples-grid');
+    if (!grid) return;
+
+    grid.innerHTML = '<div class="loading">加载示例游戏中...</div>';
+
+    try {
+        const examples = await requestJson(`${API_BASE}/examples`);
+
+        const typeIcons = {
+            fantasy: '🧙',
+            scifi: '🚀',
+            mystery: '🔍',
+            adventure: '⚔️',
+            romance: '💕'
+        };
+
+        renderExamples(examples.map(ex => ({
+            ...ex,
+            icon: typeIcons[ex.type] || '🎮',
+            title: ex.name
+        })));
+    } catch (error) {
+        console.error('加载示例游戏失败:', error);
+        grid.innerHTML = '<div class="error">加载失败，请稍后重试</div>';
+    }
+}
+
+function renderExamples(examples) {
+    const grid = document.getElementById('examples-grid');
+    if (!grid) return;
+
+    grid.innerHTML = examples.map(example => `
+        <div class="example-card" data-example-id="${example.id}" data-type="${example.type}">
+            <div class="example-cover">
+                <span style="position: relative; z-index: 1;">${example.icon}</span>
+            </div>
+            <div class="example-content">
+                <h3 class="example-title">${example.title}</h3>
+                <span class="example-type">${gameTypeNames[example.type]}</span>
+                <p class="example-description">${example.description}</p>
+                <div class="example-actions">
+                    <button class="btn-primary btn-play-example" data-example-id="${example.id}">
+                        ▶️ 立即试玩
+                    </button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+
+    // 为试玩按钮添加点击事件
+    grid.querySelectorAll('.btn-play-example').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const exampleId = btn.dataset.exampleId;
+            await startExampleGame(exampleId);
+        });
+    });
+}
+
+async function startExampleGame(exampleId) {
+    try {
+        const settings = collectLlmSettings();
+
+        // 显示加载状态
+        showScreen('loading-screen');
+        updateProgress(10, '正在启动示例游戏...', '');
+
+        const response = await requestJson(`${API_BASE}/examples/${exampleId}/start`, {
+            method: 'POST',
+            body: JSON.stringify({ settings })
+        });
+
+        updateProgress(100, '启动完成！', '');
+
+        state.currentGameId = response.gameId;
+        state.gameState = response.gameState;
+
+        // 渲染游戏界面
+        renderGameState(response.gameState);
+        showScreen('game-screen');
+
+        console.log('示例游戏已启动:', response.message);
+    } catch (error) {
+        console.error('启动示例游戏失败:', error);
+        alert('启动失败: ' + error.message);
+        showScreen('home-screen');
+    }
 }
 
 function initSavedGames() {
@@ -654,23 +799,6 @@ function saveSettings() {
     saveGenerationSettings();
 }
 
-function loadSettingsLegacy() {
-    const saved = localStorage.getItem('rpg_generator_settings');
-    if (!saved) {
-        toggleLlmSettings();
-        toggleImageSettings();
-        return;
-    }
-
-    try {
-        applyLlmSettings(JSON.parse(saved));
-        toggleLlmSettings();
-        toggleImageSettings();
-    } catch (error) {
-        console.error('加载设置失败:', error);
-    }
-}
-
 function loadSettings() {
     const savedLlm = localStorage.getItem(LLM_SETTINGS_KEY);
     const savedGeneration = localStorage.getItem(GENERATION_SETTINGS_KEY);
@@ -758,7 +886,7 @@ function readSavedGameRecord(storageKey) {
 
         return {
             gameId,
-            title: parsed?.name || '旧存档',
+            title: parsed?.name || '旧版存档',
             type: parsed?.type || 'custom',
             savedAt: null,
             gameData: null,
@@ -862,7 +990,7 @@ async function loadSavedGame(gameId) {
     renderSceneImages([]);
 
     if (!backendReady) {
-        alert('这个存档已经载入画面，但后端运行态没有恢复成功。旧存档需要重新开始后再保存一次，之后就能正常续玩。');
+        alert('这个存档已载入画面，但后端运行态未成功恢复。请重新开始后再保存一次，之后即可正常续玩。');
     }
 
     const savedGamesSection = document.getElementById('saved-games-section');
@@ -890,6 +1018,61 @@ function initImportForm() {
         event.preventDefault();
         await initImportedProjectGenerationSession();
     });
+    document.getElementById('import-package-btn')?.addEventListener('click', async () => {
+        await importProjectPackageFromFile();
+    });
+
+    document.getElementById('refresh-import-projects')?.addEventListener('click', async () => {
+        await loadImportedProjects();
+    });
+
+    loadImportedProjects().catch((error) => {
+        console.error('Load imported projects error:', error);
+    });
+}
+
+function getAdaptationModeLabel(mode) {
+    return adaptationModeNames[mode] || mode || '未设置';
+}
+
+function getPacingLabel(mode) {
+    return pacingNames[mode] || mode || '未设置';
+}
+
+async function importProjectPackageFromFile() {
+    const input = document.getElementById('import-package-file');
+    const file = input?.files?.[0];
+    if (!file) {
+        setImportStatus('请先选择一个项目包 JSON 文件。', 'error');
+        return;
+    }
+
+    setImportStatus('正在解析并导入项目包...', 'pending');
+
+    try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        const result = await requestJson(
+            '/projects/import-package',
+            createJsonRequest('POST', { package: parsed })
+        );
+
+        state.currentProjectId = result.project?.id || null;
+        state.currentProjectData = result.project || null;
+        state.currentGameType = result.project?.gameType || state.currentGameType || 'custom';
+
+        if (state.currentProjectData) {
+            document.getElementById('import-title').value = state.currentProjectData.title || '';
+        }
+
+        renderImportedProjectPreview(state.currentProjectData);
+        await loadImportedProjects();
+        showScreen('import-preview-screen');
+        setImportStatus('项目包导入成功。', 'success');
+        setImportPreviewStatus('项目包已恢复，可以继续调整后进入工作台。', 'success');
+    } catch (error) {
+        setImportStatus(`导入失败：${error.message}`, 'error');
+    }
 }
 
 function setImportStatus(message, tone = '') {
@@ -900,71 +1083,6 @@ function setImportStatus(message, tone = '') {
 
     status.textContent = message;
     status.className = `helper-text ${tone}`.trim();
-}
-
-function renderImportedProjectPreview(project = state.currentProjectData) {
-    if (!project) {
-        return;
-    }
-
-    const summaryEl = document.getElementById('import-preview-summary');
-    const charactersEl = document.getElementById('import-preview-characters');
-    const chaptersEl = document.getElementById('import-preview-chapters');
-    const visualsEl = document.getElementById('import-preview-visuals');
-
-    if (summaryEl) {
-        const themes = Array.isArray(project.storyBible?.themes) && project.storyBible.themes.length
-            ? project.storyBible.themes.join('、')
-            : '待补充';
-        const locations = Array.isArray(project.storyBible?.locations)
-            ? project.storyBible.locations.slice(0, 5).map((item) => item.name).join('、')
-            : '';
-        summaryEl.innerHTML = `
-            <p><strong>${escapeHtml(project.title || '未命名项目')}</strong></p>
-            <p>${escapeHtml(project.storyBible?.summary || project.source?.excerpt || '暂无摘要')}</p>
-            <p>主题：${escapeHtml(themes)}</p>
-            <p>主要地点：${escapeHtml(locations || '待补充')}</p>
-            <p>改编模式：${escapeHtml(project.adaptationMode || 'balanced')}</p>
-        `;
-    }
-
-    if (charactersEl) {
-        const characters = Array.isArray(project.storyBible?.characters) ? project.storyBible.characters : [];
-        charactersEl.innerHTML = characters.length
-            ? characters.map((character) => `
-                <article class="preview-pill-card">
-                    <strong>${escapeHtml(character.name || '未命名角色')}</strong>
-                    <span>${escapeHtml(character.role || '待定角色')}</span>
-                </article>
-            `).join('')
-            : '<p class="empty-hint">暂未提取到明显角色，可继续进入工作台补充。</p>';
-    }
-
-    if (chaptersEl) {
-        const chapters = Array.isArray(project.storyBible?.chapters) ? project.storyBible.chapters : [];
-        chaptersEl.innerHTML = chapters.length
-            ? chapters.map((chapter) => `
-                <article class="preview-list-item">
-                    <strong>${escapeHtml(chapter.title || chapter.name || '未命名章节')}</strong>
-                    <p>${escapeHtml(chapter.summary || '暂无章节摘要')}</p>
-                </article>
-            `).join('')
-            : '<p class="empty-hint">未识别到章节结构，后续会按段落自动拆分。</p>';
-    }
-
-    if (visualsEl) {
-        const characterHints = Array.isArray(project.visualBible?.characterSheets)
-            ? project.visualBible.characterSheets.slice(0, 4).map((item) => item.name).join('、')
-            : '';
-        const locationHints = Array.isArray(project.visualBible?.locationSheets)
-            ? project.visualBible.locationSheets.slice(0, 4).map((item) => item.name).join('、')
-            : '';
-        visualsEl.innerHTML = `
-            <p>角色基准图建议：${escapeHtml(characterHints || '先在工作台确认角色后再生成')}</p>
-            <p>场景基准图建议：${escapeHtml(locationHints || '先在工作台确认地点后再生成')}</p>
-            <p>视觉风格：${escapeHtml(project.visualBible?.styleProfile?.atmosphere || '待确认')}</p>
-        `;
-    }
 }
 
 async function beginGenerationWorkbench(data) {
@@ -1005,71 +1123,30 @@ async function initGenerationSession() {
     }
 }
 
-async function initImportedProjectGenerationSession() {
-    const content = document.getElementById('import-content')?.value.trim() || '';
-    if (!content) {
-        setImportStatus('请先粘贴要导入的长文本内容。', 'error');
-        return;
-    }
-
-    const generationConfig = normalizeGenerationConfig(collectGenerationConfig());
-    state.currentGenerationConfig = generationConfig;
-    saveGenerationSettings();
-    setImportStatus('正在解析长文本并创建项目...', 'pending');
-
-    try {
-        const importPayload = {
-            title: document.getElementById('import-title')?.value.trim() || '',
-            content,
-            gameType: document.getElementById('import-game-type')?.value || 'custom',
-            adaptationMode: document.getElementById('adaptation-mode')?.value || 'balanced'
-        };
-        const imported = await requestJson('/projects/import-text', createJsonRequest('POST', importPayload));
-        state.currentProjectId = imported.project?.id || null;
-        state.currentProjectData = imported.project || null;
-        state.currentGameType = importPayload.gameType;
-        renderImportedProjectPreview(imported.project);
-        setImportStatus('导入成功，请先检查提取结果，再决定是否进入工作台。', 'success');
-        showScreen('import-preview-screen');
-    } catch (error) {
-        console.error('Imported project init error:', error);
-        setImportStatus(error.message, 'error');
-    }
-}
-
-async function startImportedProjectSession() {
-    if (!state.currentProjectId) {
-        setImportStatus('当前没有可用的导入项目，请重新导入。', 'error');
-        showScreen('import-screen');
-        return;
-    }
-
-    const generationConfig = normalizeGenerationConfig(collectGenerationConfig());
-    state.currentGenerationConfig = generationConfig;
-    saveGenerationSettings();
-
-    try {
-        const sessionData = await requestJson(
-            `/projects/${state.currentProjectId}/init-session`,
-            createJsonRequest('POST', {
-                config: generationConfig,
-                gameType: state.currentProjectData?.gameType || state.currentGameType || 'custom',
-                userInput: state.currentProjectData?.storyBible?.summary || state.currentProjectData?.source?.excerpt || ''
-            })
-        );
-
-        await beginGenerationWorkbench(sessionData);
-        setImportStatus('导入项目已进入生成工作台。', 'success');
-    } catch (error) {
-        console.error('Start imported project session error:', error);
-        setImportStatus(error.message, 'error');
-        showScreen('import-screen');
-    }
-}
-
 function initImportPreviewEditor() {
     document.getElementById('save-import-preview')?.addEventListener('click', async () => {
         await saveImportedProjectEdits();
+    });
+    document.getElementById('optimize-project-btn')?.addEventListener('click', async () => {
+        await optimizeProject();
+    });
+    document.getElementById('resume-project-play')?.addEventListener('click', async () => {
+        await resumeProjectPlay();
+    });
+    document.getElementById('generate-base-assets')?.addEventListener('click', async () => {
+        await generateBaseAssetsForProject();
+    });
+    document.getElementById('rebuild-adaptation-btn')?.addEventListener('click', async () => {
+        await rebuildProjectAdaptation();
+    });
+    document.getElementById('rebuild-visual-bible-btn')?.addEventListener('click', async () => {
+        await rebuildProjectVisualBible();
+    });
+    document.getElementById('apply-project-refinement-btn')?.addEventListener('click', async () => {
+        await applyProjectRefinement();
+    });
+    document.getElementById('export-project-package-btn')?.addEventListener('click', async () => {
+        await exportProjectPackage();
     });
 
     document.getElementById('import-preview-screen')?.addEventListener('click', (event) => {
@@ -1195,6 +1272,8 @@ function collectImportedProjectEdits() {
     return {
         title: document.getElementById('import-preview-title')?.value.trim() || state.currentProjectData?.title || '',
         summary: document.getElementById('import-preview-summary-input')?.value.trim() || state.currentProjectData?.storyBible?.summary || '',
+        adaptationMode: document.getElementById('import-preview-adaptation-mode')?.value || state.currentProjectData?.adaptationMode || 'balanced',
+        gameType: document.getElementById('import-preview-game-type')?.value || state.currentProjectData?.gameType || state.currentGameType || 'custom',
         characters: collectImportPreviewCollection('character', (element, index) => ({
             id: element.dataset.itemId || `import_char_${index + 1}`,
             name: element.querySelector('[data-field="name"]')?.value.trim() || '',
@@ -1234,6 +1313,12 @@ function renderImportedProjectPreview(project = state.currentProjectData) {
     const characterHints = characters.slice(0, 4).map((item) => item.name).filter(Boolean).join('、');
     const locationHints = locations.slice(0, 4).map((item) => item.name).filter(Boolean).join('、');
     const atmosphere = project.visualBible?.styleProfile?.atmosphere || '待确认';
+    const playable = project.buildArtifacts?.latestPlayable || null;
+    const hasRuntimeSnapshot = Boolean(project.runtimeSnapshot?.history?.length || project.runtimeSnapshot?.plotBeatId != null);
+    const playableStatus = playable?.updatedAt
+        ? `最近可玩版本：${new Date(playable.updatedAt).toLocaleString()}`
+        : '当前还没有可试玩版本';
+    const optimizationReport = project.optimizationReport || null;
 
     if (summaryEl) {
         summaryEl.innerHTML = `
@@ -1248,19 +1333,45 @@ function renderImportedProjectPreview(project = state.currentProjectData) {
                 </div>
                 <div class="preview-meta-row">
                     <div class="preview-field">
-                        <label>改编模式</label>
-                        <input type="text" value="${escapeAttribute(project.adaptationMode || 'balanced')}" disabled />
+                        <label for="import-preview-adaptation-mode">改编模式</label>
+                        <select id="import-preview-adaptation-mode">
+                            <option value="faithful" ${project.adaptationMode === 'faithful' ? 'selected' : ''}>忠于原著</option>
+                            <option value="balanced" ${project.adaptationMode === 'balanced' ? 'selected' : ''}>平衡改编</option>
+                            <option value="free" ${project.adaptationMode === 'free' ? 'selected' : ''}>高自由互动</option>
+                        </select>
                     </div>
                     <div class="preview-field">
-                        <label>主要地点</label>
-                        <input type="text" value="${escapeAttribute(locationNames || '待补充')}" disabled />
+                        <label for="import-preview-game-type">游戏类型</label>
+                        <select id="import-preview-game-type">
+                            <option value="custom" ${project.gameType === 'custom' ? 'selected' : ''}>自定义</option>
+                            <option value="adventure" ${project.gameType === 'adventure' ? 'selected' : ''}>冒险</option>
+                            <option value="mystery" ${project.gameType === 'mystery' ? 'selected' : ''}>推理</option>
+                            <option value="romance" ${project.gameType === 'romance' ? 'selected' : ''}>恋爱</option>
+                            <option value="fantasy" ${project.gameType === 'fantasy' ? 'selected' : ''}>奇幻</option>
+                            <option value="scifi" ${project.gameType === 'scifi' ? 'selected' : ''}>科幻</option>
+                            <option value="kingdom" ${project.gameType === 'kingdom' ? 'selected' : ''}>王国</option>
+                            <option value="cultivation" ${project.gameType === 'cultivation' ? 'selected' : ''}>修仙</option>
+                        </select>
                     </div>
                 </div>
                 <div class="preview-content">
                     <p>主题：${escapeHtml(themes)}</p>
+                    <p>主要地点：${escapeHtml(locationNames || '待补充')}</p>
+                    <p>${escapeHtml(playableStatus)}</p>
+                    <p>${escapeHtml(hasRuntimeSnapshot ? '检测到运行快照，可继续试玩。' : '当前没有运行快照，将从开场开始试玩。')}</p>
+                </div>
+                <div class="preview-item-actions">
+                    <button id="optimize-project-btn" type="button" class="preview-inline-btn">一键优化项目</button>
+                    <button id="resume-project-play" type="button" class="preview-inline-btn" ${playable ? '' : 'disabled'}>${hasRuntimeSnapshot ? '继续试玩' : '试玩当前版本'}</button>
                 </div>
             </div>
         `;
+        document.getElementById('optimize-project-btn')?.addEventListener('click', async () => {
+            await optimizeProject();
+        });
+        document.getElementById('resume-project-play')?.addEventListener('click', async () => {
+            await resumeProjectPlay();
+        });
     }
 
     if (charactersEl) {
@@ -1348,6 +1459,41 @@ function renderImportedProjectPreview(project = state.currentProjectData) {
             `).join('')
             : '<p class="empty-hint">地点越准，后面的场景基准图就越稳。</p>';
 
+        const stylePreset = project.visualBible?.styleProfile?.stylePreset || '国风电影叙事';
+        const refinement = project.config?.refinement || {};
+        const branchPolicy = project.gameDesign?.branchingPolicy || {};
+        const branchSummary = `每章分支上限 ${branchPolicy.maxBranchPerChapter || '-'}，锚点保留率 ${branchPolicy.mustKeepAnchorRate || '-'}`;
+        const relationshipGraphHtml = renderRelationshipGraph(optimizationReport?.relationshipGraph);
+        const playableTreeHtml = renderPlayableChapterTree(optimizationReport?.playableChapters);
+        const optimizationHtml = optimizationReport
+            ? `
+                <article class="preview-edit-item">
+                    <strong>项目优化诊断</strong>
+                    <div class="preview-content">
+                        <p>总评分：${escapeHtml(String(optimizationReport.overallScore || 0))}</p>
+                        <p>故事完整度：${escapeHtml(String(optimizationReport.readiness?.story || 0))}</p>
+                        <p>改编完整度：${escapeHtml(String(optimizationReport.readiness?.adaptation || 0))}</p>
+                        <p>视觉完整度：${escapeHtml(String(optimizationReport.readiness?.visual || 0))}</p>
+                        <p>试玩完整度：${escapeHtml(String(optimizationReport.readiness?.playable || 0))}</p>
+                    </div>
+                    <div class="candidate-block">
+                        <div class="candidate-label">优化建议</div>
+                        <div class="candidate-paragraph">${escapeHtml((optimizationReport.recommendations || []).join('；') || '当前没有明显阻塞项。')}</div>
+                    </div>
+                    <div class="candidate-block">
+                        <div class="candidate-label">当前优势</div>
+                        <div class="candidate-paragraph">${escapeHtml((optimizationReport.strengths || []).join('；') || '继续丰富内容即可。')}</div>
+                    </div>
+                    <div class="candidate-block">
+                        <div class="candidate-label">建议下一步</div>
+                        <div class="candidate-paragraph">${escapeHtml((optimizationReport.nextActions || []).map((item) => item.label).join('；') || '当前没有明显阻塞项。')}</div>
+                    </div>
+                    ${relationshipGraphHtml}
+                    ${playableTreeHtml}
+                </article>
+            `
+            : '';
+
         visualsEl.innerHTML = `
             <div class="preview-card-header">
                 <p class="helper-text">先确认后续要做视觉建档的主要地点。</p>
@@ -1356,12 +1502,390 @@ function renderImportedProjectPreview(project = state.currentProjectData) {
             <div class="preview-edit-stack" data-preview-collection="location">
                 ${locationItems}
             </div>
+
+            <div class="preview-card-header">
+                <h3>改编导演与视觉重建</h3>
+            </div>
+            <div class="preview-edit-stack">
+                <article class="preview-edit-item">
+                    <div class="preview-field">
+                        <label for="preview-style-preset">风格预设</label>
+                        <input id="preview-style-preset" type="text" value="${escapeAttribute(stylePreset)}" placeholder="例如：国风电影叙事 / 水墨奇幻" />
+                    </div>
+                    <div class="preview-meta-row">
+                        <div class="preview-field">
+                            <label for="preview-pacing">节奏倾向</label>
+                            <select id="preview-pacing">
+                                <option value="slow" ${project.config?.pacing === 'slow' ? 'selected' : ''}>慢节奏</option>
+                                <option value="balanced" ${(!project.config?.pacing || project.config?.pacing === 'balanced') ? 'selected' : ''}>平衡</option>
+                                <option value="fast" ${project.config?.pacing === 'fast' ? 'selected' : ''}>快节奏</option>
+                            </select>
+                        </div>
+                        <div class="preview-field">
+                            <label for="preview-adaptation-strength">改编强度 (0-1)</label>
+                            <input id="preview-adaptation-strength" type="number" min="0" max="1" step="0.1" value="${Number(refinement.adaptationStrength ?? 0.5)}" />
+                        </div>
+                    </div>
+                    <div class="preview-item-actions preview-actions-grid">
+                        <button id="rebuild-adaptation-btn" type="button" class="preview-inline-btn">重算改编结构</button>
+                        <button id="rebuild-visual-bible-btn" type="button" class="preview-inline-btn">重建视觉圣经</button>
+                        <button id="apply-project-refinement-btn" type="button" class="preview-inline-btn">应用校正参数</button>
+                        <button id="export-project-package-btn" type="button" class="preview-inline-btn">导出项目包</button>
+                    </div>
+                </article>
+            </div>
+
+            <div class="preview-item-actions preview-actions-grid">
+                <button id="optimize-project-inline-btn" type="button" class="preview-inline-btn">一键优化项目</button>
+                <button id="generate-base-assets" type="button" class="preview-inline-btn">生成角色/地点基准图</button>
+            </div>
+            <div id="project-asset-list" class="preview-edit-stack"></div>
+            <div id="project-optimization-report" class="preview-edit-stack">${optimizationHtml}</div>
             <div class="preview-content">
                 <p>角色基准图建议：${escapeHtml(characterHints || '先确认角色后再生成')}</p>
                 <p>场景基准图建议：${escapeHtml(locationHints || '先确认地点后再生成')}</p>
                 <p>视觉氛围：${escapeHtml(atmosphere)}</p>
+                <p>改编策略：${escapeHtml(project.gameDesign?.adaptationProfile || getAdaptationModeLabel(project.adaptationMode || 'balanced'))} · ${escapeHtml(branchSummary)}</p>
             </div>
         `;
+        renderProjectAssetList(project.visualBible?.assetIndex || []);
+        document.getElementById('optimize-project-inline-btn')?.addEventListener('click', async () => {
+            await optimizeProject();
+        });
+        document.getElementById('generate-base-assets')?.addEventListener('click', async () => {
+            await generateBaseAssetsForProject();
+        });
+        document.getElementById('rebuild-adaptation-btn')?.addEventListener('click', async () => {
+            await rebuildProjectAdaptation();
+        });
+        document.getElementById('rebuild-visual-bible-btn')?.addEventListener('click', async () => {
+            await rebuildProjectVisualBible();
+        });
+        document.getElementById('apply-project-refinement-btn')?.addEventListener('click', async () => {
+            await applyProjectRefinement();
+        });
+        document.getElementById('export-project-package-btn')?.addEventListener('click', async () => {
+            await exportProjectPackage();
+        });
+    }
+}
+
+async function optimizeProject() {
+    if (!state.currentProjectId) {
+        setImportPreviewStatus('请先导入并保存项目。', 'error');
+        return;
+    }
+
+    setImportPreviewStatus('正在分析并优化项目结构...', 'pending');
+    try {
+        const savedProject = await saveImportedProjectEdits({ showStatus: false });
+        if (!savedProject) {
+            return;
+        }
+
+        const result = await requestJson(
+            `/projects/${state.currentProjectId}/optimize`,
+            createJsonRequest('POST', {
+                preserveAssets: true
+            })
+        );
+        state.currentProjectData = result.project || state.currentProjectData;
+        renderImportedProjectPreview(state.currentProjectData);
+        const score = result.optimizationReport?.overallScore ?? state.currentProjectData?.optimizationReport?.overallScore ?? 0;
+        setImportPreviewStatus(`项目优化完成，当前综合评分 ${score}。`, 'success');
+    } catch (error) {
+        setImportPreviewStatus(`项目优化失败：${error.message}`, 'error');
+    }
+}
+
+async function resumeProjectPlay(restart = false) {
+    if (!state.currentProjectId) {
+        setImportPreviewStatus('请先导入并保存项目。', 'error');
+        return;
+    }
+
+    setImportPreviewStatus(restart ? '正在重启试玩版本...' : '正在恢复试玩版本...', 'pending');
+
+    try {
+        const config = getEffectiveGenerationConfig();
+        const result = await requestJson(
+            `/projects/${state.currentProjectId}/play`,
+            createJsonRequest('POST', {
+                restart,
+                config: config.imageSource === 'comfyui'
+                    ? { ...config, ...readLiveComfyUIConfig() }
+                    : config
+            })
+        );
+
+        state.currentGameId = result.gameId;
+        state.sceneImages = [];
+        state.selectedSceneImageIndex = 0;
+        state.activeSceneImage = '';
+        state.transitioningSceneImage = '';
+        state.currentVisualSignature = '';
+        document.getElementById('game-log').innerHTML = '';
+        showChoices([]);
+        renderSceneImages([]);
+        showScreen('game-screen');
+        renderGameState(result.gameState);
+        setImportPreviewStatus(result.resumed ? '已恢复到上次试玩进度。' : '已载入试玩版本。', 'success');
+    } catch (error) {
+        setImportPreviewStatus(`试玩恢复失败：${error.message}`, 'error');
+    }
+}
+
+function renderProjectAssetList(assets = []) {
+    const container = document.getElementById('project-asset-list');
+    if (!container) {
+        return;
+    }
+
+    if (!Array.isArray(assets) || !assets.length) {
+        container.innerHTML = '<p class="empty-hint">暂无视觉资产，可先生成基准图。</p>';
+        return;
+    }
+
+    container.innerHTML = assets.slice(0, 8).map((asset) => `
+        <article class="preview-edit-item">
+            <strong>${escapeHtml(asset.targetName || asset.type || '未命名资产')}</strong>
+            <span class="helper-text">${escapeHtml(asset.type || 'asset')} · ${escapeHtml(asset.status || 'planned')}</span>
+            ${asset.imageUrl ? `<img src="${asset.imageUrl}" alt="${escapeAttribute(asset.targetName || '资产图')}" style="width:100%;border-radius:8px;" />` : ''}
+        </article>
+    `).join('');
+}
+
+function renderRelationshipGraph(graph = {}) {
+    const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+    const edges = Array.isArray(graph?.edges) ? graph.edges : [];
+    const hubs = Array.isArray(graph?.hubs) ? graph.hubs : [];
+
+    return `
+        <div class="candidate-block">
+            <div class="candidate-label">关系图</div>
+            <div class="relation-graph">
+                <div class="relation-graph-nodes">
+                    ${nodes.length
+                        ? nodes.map((node) => `
+                            <div class="relation-node">
+                                <strong>${escapeHtml(node.name || '未命名角色')}</strong>
+                                <span>${escapeHtml(node.role || '角色')}</span>
+                            </div>
+                        `).join('')
+                        : '<div class="relation-empty">当前还没有足够清晰的人物节点。</div>'}
+                </div>
+                <div class="relation-graph-edges">
+                    ${edges.length
+                        ? edges.map((edge) => `
+                            <div class="relation-edge">
+                                <div class="relation-edge-main">${escapeHtml(edge.source || '未知')} → ${escapeHtml(edge.target || '未知')}</div>
+                                <div class="relation-edge-meta">${escapeHtml(edge.relation || '待确认')} · 张力 ${escapeHtml(edge.tension || '中')}</div>
+                            </div>
+                        `).join('')
+                        : '<div class="relation-empty">当前还没有识别到稳定关系。</div>'}
+                </div>
+                <div class="relation-graph-hubs">
+                    <div class="relation-subtitle">关系中心</div>
+                    ${hubs.length
+                        ? hubs.map((hub, index) => `
+                            <div class="relation-hub">
+                                <span>#${index + 1}</span>
+                                <strong>${escapeHtml(hub.name || '未命名角色')}</strong>
+                                <em>连接数 ${escapeHtml(String(hub.degree || 0))}</em>
+                            </div>
+                        `).join('')
+                        : '<div class="relation-empty">暂无明显中心人物。</div>'}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderPlayableChapterTree(chapters = []) {
+    const items = Array.isArray(chapters) ? chapters : [];
+
+    return `
+        <div class="candidate-block">
+            <div class="candidate-label">章节可玩点树</div>
+            <div class="chapter-play-tree">
+                ${items.length
+                    ? items.map((chapter, index) => `
+                        <article class="chapter-play-card">
+                            <div class="chapter-play-header">
+                                <span class="chapter-play-index">CH ${index + 1}</span>
+                                <strong>${escapeHtml(chapter.title || `章节 ${index + 1}`)}</strong>
+                            </div>
+                            <div class="chapter-play-body">
+                                <p><span>冲突</span>${escapeHtml(chapter.conflict || '待补充')}</p>
+                                <p><span>风险</span>${escapeHtml(chapter.stakes || '待补充')}</p>
+                                <p><span>互动类型</span>${escapeHtml((chapter.interactiveTypes || []).join('、') || '待补充')}</p>
+                                <p><span>关键节点</span>${escapeHtml((chapter.keyNodes || []).join('、') || '待补充')}</p>
+                                <p><span>分支槽位</span>${escapeHtml(String(chapter.branchSlotCount || 0))}</p>
+                            </div>
+                        </article>
+                    `).join('')
+                    : '<div class="relation-empty">当前还没有足够的章节可玩点。</div>'}
+            </div>
+        </div>
+    `;
+}
+
+async function generateBaseAssetsForProject() {
+    if (!state.currentProjectId) {
+        setImportPreviewStatus('请先导入并保存项目。', 'error');
+        return;
+    }
+
+    const config = getEffectiveGenerationConfig();
+    if (!config.enableImages || config.imageSource === 'none') {
+        setImportPreviewStatus('当前图像生成未启用，将先以规划模式创建资产索引。', 'pending');
+    } else {
+        setImportPreviewStatus('正在生成角色/地点基准图，请稍候...', 'pending');
+    }
+
+    try {
+        const payload = {
+            dryRun: !config.enableImages || config.imageSource === 'none',
+            characterLimit: 4,
+            locationLimit: 4,
+            imageConfig: config.imageSource === 'comfyui'
+                ? { ...config, ...readLiveComfyUIConfig() }
+                : config
+        };
+
+        const result = await requestJson(
+            `/projects/${state.currentProjectId}/assets/generate-base`,
+            createJsonRequest('POST', payload)
+        );
+
+        const projectData = await requestJson(`/projects/${state.currentProjectId}`);
+        state.currentProjectData = projectData.project || state.currentProjectData;
+        renderImportedProjectPreview(state.currentProjectData);
+
+        setImportPreviewStatus(
+            payload.dryRun
+                ? `已创建 ${result.generatedAssets?.length || 0} 条资产规划。`
+                : `已生成 ${result.generatedAssets?.length || 0} 个基准资产。`,
+            'success'
+        );
+    } catch (error) {
+        setImportPreviewStatus(`基准图生成失败：${error.message}`, 'error');
+    }
+}
+
+function collectProjectRefinementPayload() {
+    const stylePreset = document.getElementById('preview-style-preset')?.value.trim() || '';
+    const pacing = document.getElementById('preview-pacing')?.value || 'balanced';
+    const adaptationStrength = Number(document.getElementById('preview-adaptation-strength')?.value ?? 0.5);
+
+    return {
+        pacing,
+        refinement: {
+            adaptationStrength: Number.isFinite(adaptationStrength) ? Math.max(0, Math.min(1, adaptationStrength)) : 0.5
+        },
+        styleProfile: stylePreset ? { stylePreset } : {}
+    };
+}
+
+async function rebuildProjectAdaptation() {
+    if (!state.currentProjectId) {
+        setImportPreviewStatus('请先导入并保存项目。', 'error');
+        return;
+    }
+
+    setImportPreviewStatus('正在重算改编结构...', 'pending');
+    try {
+        const edits = collectImportedProjectEdits();
+        const result = await requestJson(
+            `/projects/${state.currentProjectId}/adaptation/rebuild`,
+            createJsonRequest('POST', {
+                gameType: edits.gameType,
+                adaptationMode: edits.adaptationMode
+            })
+        );
+        state.currentProjectData = result.project || state.currentProjectData;
+        renderImportedProjectPreview(state.currentProjectData);
+        setImportPreviewStatus('改编结构已重算。', 'success');
+    } catch (error) {
+        setImportPreviewStatus(`重算失败：${error.message}`, 'error');
+    }
+}
+
+async function rebuildProjectVisualBible() {
+    if (!state.currentProjectId) {
+        setImportPreviewStatus('请先导入并保存项目。', 'error');
+        return;
+    }
+
+    setImportPreviewStatus('正在重建视觉圣经...', 'pending');
+    try {
+        const payload = collectProjectRefinementPayload();
+        const result = await requestJson(
+            `/projects/${state.currentProjectId}/visual-bible/rebuild`,
+            createJsonRequest('POST', {
+                styleProfile: payload.styleProfile
+            })
+        );
+        state.currentProjectData = result.project || state.currentProjectData;
+        renderImportedProjectPreview(state.currentProjectData);
+        setImportPreviewStatus('视觉圣经已重建。', 'success');
+    } catch (error) {
+        setImportPreviewStatus(`重建失败：${error.message}`, 'error');
+    }
+}
+
+async function applyProjectRefinement() {
+    if (!state.currentProjectId) {
+        setImportPreviewStatus('请先导入并保存项目。', 'error');
+        return;
+    }
+
+    setImportPreviewStatus('正在应用校正参数...', 'pending');
+    try {
+        const edits = collectImportedProjectEdits();
+        const payload = collectProjectRefinementPayload();
+        const result = await requestJson(
+            `/projects/${state.currentProjectId}/refine`,
+            createJsonRequest('POST', {
+                ...payload,
+                adaptationMode: edits.adaptationMode
+            })
+        );
+        state.currentProjectData = result.project || state.currentProjectData;
+        renderImportedProjectPreview(state.currentProjectData);
+        setImportPreviewStatus('校正参数已应用。', 'success');
+    } catch (error) {
+        setImportPreviewStatus(`应用失败：${error.message}`, 'error');
+    }
+}
+
+function downloadJsonFile(filename, data) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+async function exportProjectPackage() {
+    if (!state.currentProjectId) {
+        setImportPreviewStatus('请先导入并保存项目。', 'error');
+        return;
+    }
+
+    setImportPreviewStatus('正在导出项目包...', 'pending');
+    try {
+        const result = await requestJson(`/projects/${state.currentProjectId}/export-package`);
+        const pkg = result.package || {};
+        const fileName = `${(state.currentProjectData?.title || 'project').replace(/[\\/:*?"<>|]/g, '_')}_package.json`;
+        downloadJsonFile(fileName, pkg);
+        setImportPreviewStatus('项目包导出成功。', 'success');
+    } catch (error) {
+        setImportPreviewStatus(`导出失败：${error.message}`, 'error');
     }
 }
 
@@ -1410,29 +1934,73 @@ async function initImportedProjectGenerationSession() {
         return;
     }
 
+    if (content.length < 100) {
+        setImportStatus('文本内容过短，至少需要 100 字。', 'error');
+        return;
+    }
+
     const generationConfig = normalizeGenerationConfig(collectGenerationConfig());
     state.currentGenerationConfig = generationConfig;
     saveGenerationSettings();
-    setImportStatus('正在解析长文本并创建项目...', 'pending');
+
+    const useSmart = document.getElementById('use-smart-parse')?.checked !== false;
+    const submitBtn = document.getElementById('import-submit-btn');
+    const progressContainer = document.getElementById('import-progress');
+    const progressFill = document.getElementById('import-progress-fill');
+    const progressText = document.getElementById('import-progress-text');
+
+    if (submitBtn) submitBtn.disabled = true;
 
     try {
         const importPayload = {
             title: document.getElementById('import-title')?.value.trim() || '',
             content,
             gameType: document.getElementById('import-game-type')?.value || 'custom',
-            adaptationMode: document.getElementById('adaptation-mode')?.value || 'balanced'
+            adaptationMode: document.getElementById('adaptation-mode')?.value || 'balanced',
+            useSmart,
+            settings: useSmart ? collectLlmSettings() : undefined
         };
-        const imported = await requestJson('/projects/import-text', createJsonRequest('POST', importPayload));
-        state.currentProjectId = imported.project?.id || null;
-        state.currentProjectData = imported.project || null;
-        state.currentGameType = importPayload.gameType;
-        renderImportedProjectPreview(imported.project);
-        setImportStatus('导入成功，请先检查提取结果，再决定是否进入工作台。', 'success');
-        setImportPreviewStatus('可以先轻量修改角色、章节和地点，再确认进入工作台。');
+
+        if (useSmart) {
+            // 使用智能解析，显示进度
+            if (progressContainer) progressContainer.style.display = 'block';
+            setImportStatus('正在使用 AI 智能解析文本...', 'pending');
+
+            const imported = await requestJsonWithProgress(
+                '/projects/import-text',
+                createJsonRequest('POST', importPayload),
+                (percent, message) => {
+                    if (progressFill) progressFill.style.width = `${percent}%`;
+                    if (progressText) progressText.textContent = message || `解析中... ${percent}%`;
+                }
+            );
+
+            state.currentProjectId = imported.project?.id || null;
+            state.currentProjectData = imported.project || null;
+            state.currentGameType = importPayload.gameType;
+            renderImportedProjectPreview(imported.project);
+            setImportStatus('AI 智能解析完成！请检查提取结果。', 'success');
+            setImportPreviewStatus('AI 已智能识别章节、角色和关系，可以轻量修改后进入工作台。', 'success');
+        } else {
+            // 使用快速解析
+            setImportStatus('正在快速解析文本...', 'pending');
+            const imported = await requestJson('/projects/import-text', createJsonRequest('POST', importPayload));
+            state.currentProjectId = imported.project?.id || null;
+            state.currentProjectData = imported.project || null;
+            state.currentGameType = importPayload.gameType;
+            renderImportedProjectPreview(imported.project);
+            setImportStatus('快速解析完成，请检查提取结果。', 'success');
+            setImportPreviewStatus('可以先轻量修改角色、章节和地点，再确认进入工作台。');
+        }
+
+        await loadImportedProjects();
         showScreen('import-preview-screen');
     } catch (error) {
         console.error('Imported project init error:', error);
-        setImportStatus(error.message, 'error');
+        setImportStatus(`导入失败：${error.message}`, 'error');
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
+        if (progressContainer) progressContainer.style.display = 'none';
     }
 }
 
@@ -1472,6 +2040,108 @@ async function startImportedProjectSession() {
         setImportStatus(error.message, 'error');
         setImportPreviewStatus(error.message, 'error');
         showScreen('import-screen');
+    }
+}
+
+async function loadImportedProjects() {
+    const container = document.getElementById('import-project-list');
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = '<p class="empty-hint">正在加载项目列表...</p>';
+
+    try {
+        const data = await requestJson('/projects');
+        const projects = Array.isArray(data.projects) ? data.projects : [];
+
+        if (!projects.length) {
+            container.innerHTML = '<p class="empty-hint">还没有导入项目。</p>';
+            return;
+        }
+
+        container.innerHTML = projects.map((project) => `
+            <article class="import-project-card" data-project-id="${escapeAttribute(project.id)}">
+                <div class="import-project-main">
+                    <strong>${escapeHtml(project.title || '未命名项目')}</strong>
+                    <p>${escapeHtml(project.summary || '暂无摘要')}</p>
+                    <div class="import-project-meta">
+                        <span>${escapeHtml(gameTypeNames[project.gameType] || '自定义 RPG')}</span>
+                        <span>${escapeHtml(getAdaptationModeLabel(project.adaptationMode || 'balanced'))}</span>
+                        <span>${escapeHtml(new Date(project.updatedAt || project.createdAt || Date.now()).toLocaleString())}</span>
+                    </div>
+                </div>
+                <div class="import-project-actions">
+                    <button type="button" class="preview-inline-btn" data-action="open">继续编辑</button>
+                    <button type="button" class="preview-inline-btn danger" data-action="delete">删除</button>
+                </div>
+            </article>
+        `).join('');
+
+        container.querySelectorAll('[data-action="open"]').forEach((button) => {
+            button.addEventListener('click', async () => {
+                const card = button.closest('[data-project-id]');
+                const projectId = card?.getAttribute('data-project-id');
+                if (!projectId) {
+                    return;
+                }
+
+                await openImportedProject(projectId);
+            });
+        });
+
+        container.querySelectorAll('[data-action="delete"]').forEach((button) => {
+            button.addEventListener('click', async () => {
+                const card = button.closest('[data-project-id]');
+                const projectId = card?.getAttribute('data-project-id');
+                if (!projectId) {
+                    return;
+                }
+
+                await deleteImportedProject(projectId);
+            });
+        });
+    } catch (error) {
+        container.innerHTML = `<p class="empty-hint">项目列表加载失败：${escapeHtml(error.message)}</p>`;
+    }
+}
+
+async function openImportedProject(projectId) {
+    try {
+        const data = await requestJson(`/projects/${projectId}`);
+        state.currentProjectId = data.project?.id || projectId;
+        state.currentProjectData = data.project || null;
+        state.currentGameType = data.project?.gameType || state.currentGameType;
+
+        if (state.currentProjectData) {
+            document.getElementById('import-title').value = state.currentProjectData.title || '';
+            state.currentGameType = state.currentProjectData.gameType || state.currentGameType;
+        }
+
+        renderImportedProjectPreview(state.currentProjectData);
+        setImportStatus('已加载导入项目，你可以继续修改。', 'success');
+        setImportPreviewStatus('项目已加载，可直接修改并继续进入工作台。');
+        showScreen('import-preview-screen');
+    } catch (error) {
+        setImportStatus(`加载项目失败：${error.message}`, 'error');
+    }
+}
+
+async function deleteImportedProject(projectId) {
+    if (!confirm('确定删除这个导入项目吗？删除后不可恢复。')) {
+        return;
+    }
+
+    try {
+        await requestJson(`/projects/${projectId}`, createJsonRequest('DELETE', {}));
+        if (state.currentProjectId === projectId) {
+            state.currentProjectId = null;
+            state.currentProjectData = null;
+        }
+        await loadImportedProjects();
+        setImportStatus('项目已删除。', 'success');
+    } catch (error) {
+        setImportStatus(`删除项目失败：${error.message}`, 'error');
     }
 }
 
@@ -1577,7 +2247,7 @@ async function loadStep(stepId) {
     const localState = getStepState(stepId);
     localState.status = 'loading';
     renderCurrentStep(stepId);
-    setApiStatus('calling', `正在生成「${stepDescriptions[stepId]?.name || stepId}」...`);
+    setApiStatus('calling', `正在生成 ${stepDescriptions[stepId]?.name || stepId}...`);
 
     try {
         const data = await requestJson('/generate/step', createJsonRequest('POST', {
@@ -1676,7 +2346,7 @@ function getCandidateTitle(stepId, candidate, index) {
 
 function renderCandidateContent(stepId, candidate) {
     if (candidate?.error) {
-        return renderParagraph('解析提示', candidate.error || 'AI 响应暂时无法解析，请尝试重生成。');
+        return renderParagraph('解析提示', candidate.error || 'AI 响应暂时无法解析，请尝试重新生成。');
     }
 
     if (typeof candidate === 'string') {
@@ -1828,7 +2498,7 @@ async function regenerateStep(feedback) {
     const localState = getStepState(state.currentStepId);
     localState.status = 'loading';
     renderCurrentStep(state.currentStepId);
-    setApiStatus('calling', `正在重生成「${stepDescriptions[state.currentStepId]?.name || state.currentStepId}」...`);
+    setApiStatus('calling', `正在重新生成 ${stepDescriptions[state.currentStepId]?.name || state.currentStepId}...`);
 
     try {
         const data = await requestJson('/generate/regenerate', createJsonRequest('POST', {
@@ -1846,7 +2516,7 @@ async function regenerateStep(feedback) {
             candidates: localState.candidates.map((item) => structuredClone(item))
         });
 
-        setApiStatus('success', '已完成重生成。');
+        setApiStatus('success', '已完成重新生成。');
     } catch (error) {
         console.error('Regenerate error:', error);
         localState.status = 'error';
@@ -1995,20 +2665,335 @@ function renderHistoryPanel() {
     panel.innerHTML = sections.join('') || '<p class="empty-hint">暂无生成记录。</p>';
 }
 
-async function finalizeGameLegacy() {
+function getEffectiveGenerationConfig() {
+    if (state.currentGenerationConfig) {
+        return normalizeGenerationConfig(state.currentGenerationConfig);
+    }
+
+    const collected = normalizeGenerationConfig(collectGenerationConfig());
+    state.currentGenerationConfig = collected;
+    return collected;
+}
+
+function appendLog(type, content, speaker = '') {
+    const log = document.getElementById('game-log');
+    if (!log) {
+        return null;
+    }
+
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+
+    if (speaker) {
+        const speakerEl = document.createElement('div');
+        speakerEl.className = 'speaker';
+        speakerEl.textContent = speaker;
+        entry.appendChild(speakerEl);
+    }
+
+    const contentEl = document.createElement('div');
+    contentEl.className = 'content';
+    contentEl.textContent = content;
+    entry.appendChild(contentEl);
+
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+
+    // 返回 contentEl 以便流式更新
+    return contentEl;
+}
+
+function showChoices(choices = []) {
+    const container = document.getElementById('choices-container');
+    if (!container) {
+        return;
+    }
+
+    if (!Array.isArray(choices) || !choices.length) {
+        container.innerHTML = '';
+        return;
+    }
+
+    container.innerHTML = choices.map((choice, index) => `
+        <button type="button" class="choice-btn" data-choice-index="${index}">
+            ${escapeHtml(choice.text || choice.action || `选项 ${index + 1}`)}
+        </button>
+    `).join('');
+
+    container.querySelectorAll('[data-choice-index]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            const index = Number(button.getAttribute('data-choice-index'));
+            const selected = choices[index];
+            if (!selected) {
+                return;
+            }
+            await sendPlayerAction(selected.action || selected.text || '');
+        });
+    });
+}
+
+function renderStats(stats = {}) {
+    const container = document.getElementById('player-stats');
+    if (!container) {
+        return;
+    }
+
+    const items = Object.entries(stats || {});
+    if (!items.length) {
+        container.innerHTML = '<p class="empty-hint">暂无属性信息</p>';
+        return;
+    }
+
+    container.innerHTML = items.map(([name, value]) => {
+        if (value && typeof value === 'object' && Number.isFinite(value.current) && Number.isFinite(value.max)) {
+            const ratio = value.max > 0 ? Math.max(0, Math.min(100, (value.current / value.max) * 100)) : 0;
+            return `
+                <div class="stat-item">
+                    <div style="width:100%">
+                        <span class="stat-name">${escapeHtml(name)}</span>
+                        <span class="stat-value" style="float:right">${value.current}/${value.max}</span>
+                        <div class="stat-bar"><div class="stat-bar-fill hp" style="width:${ratio}%"></div></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="stat-item">
+                <span class="stat-name">${escapeHtml(name)}</span>
+                <span class="stat-value">${escapeHtml(String(value))}</span>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderInventory(inventory = []) {
+    const list = document.getElementById('inventory-list');
+    if (!list) {
+        return;
+    }
+
+    if (!Array.isArray(inventory) || !inventory.length) {
+        list.innerHTML = '<li>暂无物品</li>';
+        return;
+    }
+
+    list.innerHTML = inventory.map((item) => `<li>${escapeHtml(item.name || String(item))}</li>`).join('');
+}
+
+function renderQuests(quests = []) {
+    const list = document.getElementById('quest-list');
+    if (!list) {
+        return;
+    }
+
+    if (!Array.isArray(quests) || !quests.length) {
+        list.innerHTML = '<li>暂无任务</li>';
+        return;
+    }
+
+    list.innerHTML = quests.map((quest) => `
+        <li class="${quest.completed ? 'completed' : ''}">
+            ${escapeHtml(quest.name || quest.description || '未命名任务')}
+            ${quest.progress ? ` · ${escapeHtml(quest.progress)}` : ''}
+        </li>
+    `).join('');
+}
+
+async function startGame(gameId = state.currentGameId) {
+    if (!gameId) {
+        return;
+    }
+
     try {
-        const data = await requestJson(
+        const data = await requestJson(`/games/${gameId}/start`, createJsonRequest('POST', {}));
+        state.currentGameId = gameId;
+        state.gameState = data.gameState || null;
+        state.sceneImages = [];
+        state.selectedSceneImageIndex = 0;
+        state.activeSceneImage = '';
+        state.transitioningSceneImage = '';
+        state.currentVisualSignature = '';
+        document.getElementById('game-log').innerHTML = '';
+        showChoices([]);
+        renderSceneImages([]);
+        showScreen('game-screen');
+        renderGameState(state.gameState);
+    } catch (error) {
+        alert(`启动游戏失败：${error.message}`);
+    }
+}
+
+async function finalizeGame() {
+    if (!state.currentSessionId) {
+        alert('当前没有生成会话。');
+        return;
+    }
+
+    setApiStatus('calling', '正在整合并生成最终游戏...');
+    try {
+        const result = await requestJson(
             `/generate/${state.currentSessionId}/finalize`,
-            createJsonRequest('POST', { config: collectGenerationConfig() })
+            createJsonRequest('POST', { config: getEffectiveGenerationConfig() })
         );
 
-        state.currentGameId = data.gameId;
-        showScreen('loading-screen');
-        updateProgress(100, '游戏已整合完成', '正在启动游戏...');
-        setTimeout(() => startGame(data.gameId), 500);
+        state.currentGameId = result.gameId;
+        state.currentGameData = result.gameData || null;
+        state.currentGameType = result.gameData?.type || state.currentGameType;
+        await startGame(state.currentGameId);
+        setApiStatus('success', '游戏已生成并启动。');
     } catch (error) {
-        console.error('Finalize game error:', error);
+        setApiStatus('error', error.message);
         alert(`整合失败：${error.message}`);
+    }
+}
+
+async function sendPlayerAction(actionOverride = '') {
+    if (!state.currentGameId) {
+        return;
+    }
+
+    const input = document.getElementById('player-input');
+    const sendButton = document.getElementById('send-btn');
+    const action = actionOverride || input?.value.trim() || '';
+    if (!action) {
+        return;
+    }
+
+    if (input) {
+        input.value = '';
+    }
+    if (sendButton) {
+        sendButton.disabled = true;
+    }
+    appendLog('player', action, '你');
+
+    try {
+        const baseConfig = getEffectiveGenerationConfig();
+        const imageConfig = baseConfig.imageSource === 'comfyui'
+            ? { ...baseConfig, ...readLiveComfyUIConfig() }
+            : baseConfig;
+
+        // 检查是否启用流式输出
+        const useStreaming = state.settings?.enableStreaming !== false; // 默认启用
+
+        if (useStreaming) {
+            await sendPlayerActionStreaming(action, imageConfig);
+        } else {
+            await sendPlayerActionNormal(action, imageConfig);
+        }
+    } catch (error) {
+        appendLog('system', `行动处理失败：${error.message}`);
+    } finally {
+        if (sendButton) {
+            sendButton.disabled = false;
+        }
+    }
+}
+
+/**
+ * 流式发送玩家动作
+ */
+async function sendPlayerActionStreaming(action, imageConfig) {
+    const response = await fetch(`${API_BASE}/games/${state.currentGameId}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action,
+            imageConfig,
+            streaming: true
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let currentNarration = '';
+    let narratorLogElement = null;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+            if (!line.trim() || line === 'data: [DONE]') continue;
+            if (!line.startsWith('data: ')) continue;
+
+            try {
+                const chunk = JSON.parse(line.slice(6));
+
+                if (chunk.type === 'narration') {
+                    // 流式显示旁白
+                    if (!narratorLogElement) {
+                        narratorLogElement = appendLog('narrator', '');
+                    }
+                    currentNarration = chunk.text;
+                    narratorLogElement.textContent = currentNarration;
+                } else if (chunk.type === 'complete') {
+                    // 完成
+                    if (Array.isArray(chunk.gameState?.lastDialogues)) {
+                        chunk.gameState.lastDialogues.forEach((dialogue) => {
+                            if (!dialogue?.content) return;
+                            appendLog('narrator', dialogue.content, dialogue.speaker || '角色');
+                        });
+                    }
+
+                    if (chunk.gameOver && chunk.gameOverMessage) {
+                        appendLog('system', chunk.gameOverMessage);
+                    }
+
+                    showChoices(chunk.choices || []);
+                    renderGameState(chunk.gameState || state.gameState);
+                }
+            } catch (e) {
+                console.error('解析流式数据失败:', e);
+            }
+        }
+    }
+}
+
+/**
+ * 普通模式发送玩家动作
+ */
+async function sendPlayerActionNormal(action, imageConfig) {
+    const result = await requestJson(
+        `/games/${state.currentGameId}/action`,
+        createJsonRequest('POST', {
+            action,
+            imageConfig
+        })
+    );
+
+    if (Array.isArray(result.gameState?.lastDialogues)) {
+        result.gameState.lastDialogues.forEach((dialogue) => {
+            if (!dialogue?.content) {
+                return;
+            }
+            appendLog('narrator', dialogue.content, dialogue.speaker || '角色');
+        });
+    }
+
+    if (result.response) {
+        appendLog('narrator', result.response);
+    }
+
+    if (result.gameOver && result.gameOverMessage) {
+        appendLog('system', result.gameOverMessage);
+    }
+
+    showChoices(result.choices || []);
+    renderGameState(result.gameState || state.gameState);
+
+    if (result.sceneImage) {
+        renderSceneImages([result.sceneImage], result.visualState?.prompt || result.sceneDescription || result.response);
     }
 }
 
@@ -2133,824 +3118,6 @@ function initGameScreen() {
     syncLiveImageConfigPanel();
 }
 
-async function startGameLegacy(gameId) {
-    try {
-        const data = await requestJson(`/games/${gameId}/start`, createJsonRequest('POST', {}));
-        state.currentGameId = gameId;
-        state.gameState = data.gameState;
-        state.sceneImages = [];
-        state.selectedSceneImageIndex = 0;
-        showScreen('game-screen');
-        renderGameState(data.gameState);
-        renderSceneImages([]);
-        refreshLiveComfyUIOptions(false).catch(() => {});
-        refreshLiveComfyWorkflowFiles(false)
-            .then(() => {
-                const savedWorkflow = state.currentGenerationConfig?.comfyuiWorkflowFile;
-                if (savedWorkflow) {
-                    return loadSelectedLiveWorkflowFile(false, savedWorkflow);
-                }
-                return null;
-            })
-            .catch(() => {});
-    } catch (error) {
-        console.error('Start game error:', error);
-        alert(`启动游戏失败：${error.message}`);
-    }
-}
-
-async function sendPlayerActionLegacy() {
-    const input = document.getElementById('player-input');
-    const action = input.value.trim();
-
-    if (!action || !state.currentGameId) {
-        return;
-    }
-
-    input.value = '';
-    appendLog('player', action);
-
-    try {
-        const imageConfig = getEffectiveGenerationConfig().imageSource === 'comfyui'
-            ? { ...getEffectiveGenerationConfig(), ...readLiveComfyUIConfig() }
-            : getEffectiveGenerationConfig();
-        const data = await requestJson(
-            `/games/${state.currentGameId}/action`,
-            createJsonRequest('POST', { action, imageConfig })
-        );
-
-        appendLog('narrator', data.response || '');
-        renderChoices(data.choices || []);
-        renderGameState(data.gameState);
-
-        if (data.sceneImage) {
-            const imageContainer = document.getElementById('scene-image');
-            imageContainer.innerHTML = `<img src="${data.sceneImage}" alt="场景图" />`;
-        }
-    } catch (error) {
-        console.error('Send player action error:', error);
-        appendLog('system', `系统提示：${error.message}`);
-    }
-}
-
-function renderChoices(choices) {
-    const container = document.getElementById('choices-container');
-    container.innerHTML = '';
-
-    choices.forEach((choice) => {
-        const button = document.createElement('button');
-        button.className = 'choice-btn';
-        button.textContent = choice.text;
-        button.addEventListener('click', () => {
-            document.getElementById('player-input').value = choice.action || choice.text;
-            sendPlayerAction();
-        });
-        container.appendChild(button);
-    });
-}
-
-function renderGameStateLegacy(gameState = state.gameState) {
-    if (!gameState) {
-        return;
-    }
-
-    state.gameState = gameState;
-    state.currentVisualSignature = gameState.visualState?.signature || state.currentVisualSignature;
-    document.getElementById('game-title').textContent = gameState.name || 'AI 生成 RPG';
-    document.getElementById('scene-description').textContent = gameState.sceneDescription || '';
-    const storyCopy = document.getElementById('scene-story-copy');
-    if (storyCopy) {
-        storyCopy.textContent = gameState.sceneDescription || '';
-    }
-
-    const log = document.getElementById('game-log');
-    if (gameState.initialLog && !log.children.length) {
-        appendLog('narrator', gameState.initialLog);
-    }
-
-    renderStats(gameState.player?.stats || {});
-    renderInventory(gameState.inventory || []);
-    renderQuests(gameState.quests || []);
-}
-
-function appendLog(type, content) {
-    const log = document.getElementById('game-log');
-    const entry = document.createElement('div');
-    entry.className = `log-entry ${type}`;
-    entry.innerHTML = type === 'narrator'
-        ? `<div class="speaker">旁白</div><div class="content">${escapeHtml(content)}</div>`
-        : `<div class="content">${escapeHtml(content)}</div>`;
-
-    log.appendChild(entry);
-    log.scrollTop = log.scrollHeight;
-}
-
-function renderStats(stats) {
-    const container = document.getElementById('player-stats');
-    container.innerHTML = '';
-
-    for (const [key, value] of Object.entries(stats)) {
-        const item = document.createElement('div');
-        item.className = 'stat-item';
-
-        if (value && typeof value === 'object' && value.current !== undefined) {
-            const current = value.current ?? 0;
-            const max = value.max || 1;
-            const width = Math.max(0, Math.min(100, Math.round((current / max) * 100)));
-            item.innerHTML = `
-                <div>
-                    <div class="stat-name">${escapeHtml(key)}</div>
-                    <div class="stat-bar"><div class="stat-bar-fill" style="width:${width}%"></div></div>
-                </div>
-                <div class="stat-value">${current}/${max}</div>
-            `;
-        } else {
-            item.innerHTML = `
-                <span class="stat-name">${escapeHtml(key)}</span>
-                <span class="stat-value">${escapeHtml(String(value))}</span>
-            `;
-        }
-
-        container.appendChild(item);
-    }
-}
-
-function renderInventory(items) {
-    const list = document.getElementById('inventory-list');
-    list.innerHTML = items.map((item) => `<li>${escapeHtml(item.name || String(item))}</li>`).join('');
-}
-
-function renderQuests(quests) {
-    const list = document.getElementById('quest-list');
-    list.innerHTML = quests
-        .map((quest) => `<li class="${quest.completed ? 'completed' : ''}">${escapeHtml(quest.name || quest.description || '任务')}</li>`)
-        .join('');
-}
-
-function getEffectiveGenerationConfig() {
-    return normalizeGenerationConfig(state.currentGenerationConfig || collectGenerationConfig());
-}
-
-function syncSceneImageControls() {
-    const controls = document.getElementById('scene-image-controls');
-    const promptInput = document.getElementById('scene-image-prompt');
-    const countInput = document.getElementById('scene-image-count');
-    const button = document.getElementById('generate-scene-image-btn');
-    const config = getEffectiveGenerationConfig();
-    const imageEnabled = config.enableImages !== false && config.imageSource !== 'none';
-    const suggestedPrompt = state.gameState?.sceneDescription || state.gameState?.initialLog || '';
-
-    if (countInput) {
-        countInput.value = String(Math.max(1, Math.min(8, Number(config.comfyuiImageCount) || 1)));
-    }
-
-    if (promptInput && (!promptInput.value.trim() || promptInput.value === state.lastSuggestedImagePrompt)) {
-        promptInput.value = suggestedPrompt;
-    }
-
-    state.lastSuggestedImagePrompt = suggestedPrompt;
-    syncLiveImageConfigPanel();
-
-    if (controls) {
-        controls.style.display = imageEnabled ? 'block' : 'none';
-    }
-
-    if (button) {
-        button.disabled = !imageEnabled || !state.currentGameId;
-    }
-
-    if (!imageEnabled) {
-        setSceneImageStatus('Image generation is disabled in settings.');
-        setLiveComfyUiStatus('Image generation is disabled in settings.');
-        return;
-    }
-
-    if (config.imageSource === 'comfyui') {
-        setSceneImageStatus(
-            config.imageGenerationMode === 'auto'
-                ? 'Auto mode is enabled. You can still click the button to regenerate the current scene.'
-                : 'Manual mode is enabled. Edit the prompt below and click the button to call ComfyUI.'
-        );
-        setLiveComfyUiStatus('ComfyUI live settings are available here. Changes take effect immediately for the next generation.');
-        return;
-    }
-
-    setSceneImageStatus('Image generation is enabled.');
-    setLiveComfyUiStatus('Image API mode uses the generate button directly. No ComfyUI parameters are needed.', 'success');
-}
-
-function setSceneImageStatus(message, status = '') {
-    const statusEl = document.getElementById('scene-image-status');
-    if (!statusEl) {
-        return;
-    }
-
-    statusEl.textContent = message;
-    statusEl.className = `helper-text ${status}`.trim();
-}
-
-function setSceneImageLoadingState(isLoading) {
-    const promptInput = document.getElementById('scene-image-prompt');
-    const countInput = document.getElementById('scene-image-count');
-    const button = document.getElementById('generate-scene-image-btn');
-
-    if (promptInput) {
-        promptInput.disabled = isLoading;
-    }
-
-    if (countInput) {
-        countInput.disabled = isLoading;
-    }
-
-    if (button) {
-        button.disabled = isLoading || !state.currentGameId;
-        button.textContent = isLoading ? 'Generating...' : 'Generate scene image';
-    }
-}
-
-function syncLiveImageConfigState() {
-    const baseConfig = getEffectiveGenerationConfig();
-    state.currentGenerationConfig = {
-        ...baseConfig,
-        ...readLiveComfyUIConfig(),
-        comfyuiImageCount: document.getElementById('scene-image-count')?.value || baseConfig.comfyuiImageCount || '1'
-    };
-    localStorage.setItem(GENERATION_SETTINGS_KEY, JSON.stringify(state.currentGenerationConfig));
-}
-
-function syncLiveImageConfigPanel() {
-    const panel = document.getElementById('live-image-config');
-    const imageSource = getEffectiveGenerationConfig().imageSource;
-    const config = getEffectiveGenerationConfig();
-
-    if (!panel) {
-        return;
-    }
-
-    panel.style.display = imageSource === 'comfyui' ? 'block' : 'none';
-
-    const fieldValues = {
-        'live-comfyui-url': config.comfyuiUrl || 'http://127.0.0.1:8000',
-        'live-comfyui-model': config.comfyuiModel || '',
-        'live-comfyui-sampler': config.comfyuiSampler || 'euler',
-        'live-comfyui-scheduler': config.comfyuiScheduler || 'normal',
-        'live-comfyui-width': config.comfyuiWidth || '768',
-        'live-comfyui-height': config.comfyuiHeight || '512',
-        'live-comfyui-steps': config.comfyuiSteps || '20',
-        'live-comfyui-cfg': config.comfyuiCfg || '7.5',
-        'live-comfyui-seed': config.comfyuiSeed || '-1',
-        'live-comfyui-timeout-ms': config.comfyuiTimeoutMs || '180000',
-        'live-comfyui-prompt-prefix': config.comfyuiPromptPrefix || 'RPG game scene',
-        'live-comfyui-prompt-suffix': config.comfyuiPromptSuffix || 'high quality, detailed, fantasy art style',
-        'live-comfyui-negative-prompt': config.comfyuiNegativePrompt || 'low quality, blurry, deformed, ugly, bad anatomy, watermark, text',
-        'live-comfyui-filename-prefix': config.comfyuiFilenamePrefix || 'rpg_scene',
-        'live-comfyui-workflow-mode': config.comfyuiWorkflowMode || 'custom',
-        'live-comfyui-workflow-file': config.comfyuiWorkflowFile || '',
-        'live-comfyui-workflow-json': config.comfyuiWorkflowJson || ''
-    };
-
-    for (const [id, value] of Object.entries(fieldValues)) {
-        const element = document.getElementById(id);
-        if (element && value !== undefined && value !== null && (!element.value || document.activeElement !== element)) {
-            element.value = String(value);
-        }
-    }
-
-    toggleLiveWorkflowMode();
-}
-
-function renderSceneImages(images = [], prompt = '') {
-    const imageContainer = document.getElementById('scene-image');
-    const gallery = document.getElementById('scene-image-gallery');
-    const promptInput = document.getElementById('scene-image-prompt');
-
-    state.sceneImages = Array.isArray(images) ? images.filter(Boolean) : [];
-    state.selectedSceneImageIndex = Math.max(
-        0,
-        Math.min(state.selectedSceneImageIndex, Math.max(0, state.sceneImages.length - 1))
-    );
-
-    if (prompt && promptInput && (!promptInput.value.trim() || promptInput.value === state.lastSuggestedImagePrompt)) {
-        promptInput.value = prompt;
-    }
-
-    if (!imageContainer || !gallery) {
-        return;
-    }
-
-    if (!state.sceneImages.length) {
-        state.activeSceneImage = '';
-        state.transitioningSceneImage = '';
-        imageContainer.innerHTML = '<div class="placeholder">场景图像将在这里显示</div>';
-        gallery.innerHTML = '';
-        syncSceneImageControls();
-        return;
-    }
-
-    const activeImage = state.sceneImages[state.selectedSceneImageIndex] || state.sceneImages[0];
-    renderSceneImageStage(activeImage);
-
-    gallery.innerHTML = state.sceneImages
-        .map((src, index) => `
-            <button type="button" class="scene-thumb ${index === state.selectedSceneImageIndex ? 'active' : ''}" data-scene-image-index="${index}">
-                <img src="${src}" alt="Scene image ${index + 1}" />
-            </button>
-        `)
-        .join('');
-
-    gallery.querySelectorAll('[data-scene-image-index]').forEach((button) => {
-        button.addEventListener('click', () => {
-            state.selectedSceneImageIndex = Number(button.dataset.sceneImageIndex) || 0;
-            renderSceneImages(state.sceneImages);
-        });
-    });
-
-    syncSceneImageControls();
-}
-
-function renderSceneImageStage(nextImage) {
-    const imageContainer = document.getElementById('scene-image');
-
-    if (!imageContainer) {
-        return;
-    }
-
-    if (!nextImage) {
-        state.activeSceneImage = '';
-        state.transitioningSceneImage = '';
-        imageContainer.innerHTML = '<div class="placeholder">场景图像将在这里显示</div>';
-        return;
-    }
-
-    if (!state.activeSceneImage || state.activeSceneImage === nextImage) {
-        state.sceneImageTransitionToken += 1;
-        state.activeSceneImage = nextImage;
-        state.transitioningSceneImage = '';
-        imageContainer.innerHTML = `
-            <div class="scene-image-layer is-active">
-                <img src="${nextImage}" alt="Scene image" />
-            </div>
-        `;
-        return;
-    }
-
-    const transitionToken = state.sceneImageTransitionToken + 1;
-    state.sceneImageTransitionToken = transitionToken;
-    state.transitioningSceneImage = nextImage;
-
-    const preloadImage = new Image();
-    preloadImage.decoding = 'async';
-    preloadImage.onload = () => {
-        if (state.sceneImageTransitionToken !== transitionToken) {
-            return;
-        }
-
-        imageContainer.innerHTML = `
-            <div class="scene-image-layer scene-image-layer-back is-active">
-                <img src="${state.activeSceneImage}" alt="Current scene image" />
-            </div>
-            <div class="scene-image-layer scene-image-layer-front">
-                <img src="${nextImage}" alt="Next scene image" />
-            </div>
-        `;
-
-        const frontLayer = imageContainer.querySelector('.scene-image-layer-front');
-        requestAnimationFrame(() => {
-            frontLayer?.classList.add('is-active');
-        });
-
-        window.setTimeout(() => {
-            if (state.sceneImageTransitionToken !== transitionToken) {
-                return;
-            }
-
-            state.activeSceneImage = nextImage;
-            state.transitioningSceneImage = '';
-            imageContainer.innerHTML = `
-                <div class="scene-image-layer is-active">
-                    <img src="${nextImage}" alt="Scene image" />
-                </div>
-            `;
-        }, 420);
-    };
-    preloadImage.onerror = () => {
-        if (state.sceneImageTransitionToken !== transitionToken) {
-            return;
-        }
-
-        state.activeSceneImage = nextImage;
-        state.transitioningSceneImage = '';
-        imageContainer.innerHTML = `
-            <div class="scene-image-layer is-active">
-                <img src="${nextImage}" alt="Scene image" />
-            </div>
-        `;
-    };
-    preloadImage.src = nextImage;
-}
-
-async function refreshComfyUIOptions(showStatus = true) {
-    const imageSource = document.getElementById('image-source')?.value;
-    if (imageSource !== 'comfyui') {
-        return null;
-    }
-
-    const config = readComfyUIConfig();
-    if (showStatus) {
-        setComfyUiStatus('Refreshing ComfyUI options...', 'pending');
-    }
-
-    try {
-        const params = new URLSearchParams({ comfyuiUrl: config.comfyuiUrl || 'http://127.0.0.1:8000' });
-        const result = await requestJson(`/comfyui/options?${params.toString()}`);
-
-        populateSelect('comfyui-model', result.checkpoints || [], config.comfyuiModel);
-        populateSelect('comfyui-sampler', result.samplers || [], config.comfyuiSampler);
-        populateSelect('comfyui-scheduler', result.schedulers || [], config.comfyuiScheduler);
-
-        const summary = [
-            Array.isArray(result.checkpoints) ? `${result.checkpoints.length} checkpoints` : null,
-            Array.isArray(result.samplers) ? `${result.samplers.length} samplers` : null,
-            Array.isArray(result.schedulers) ? `${result.schedulers.length} schedulers` : null
-        ].filter(Boolean).join(', ');
-
-        setComfyUiStatus(summary ? `ComfyUI ready: ${summary}.` : 'ComfyUI connection succeeded.', 'success');
-        saveGenerationSettings();
-        return result;
-    } catch (error) {
-        setComfyUiStatus(error.message, 'error');
-        throw error;
-    }
-}
-
-async function refreshComfyWorkflowFiles(showStatus = true) {
-    const imageSource = document.getElementById('image-source')?.value;
-    if (imageSource !== 'comfyui') {
-        return null;
-    }
-
-    if (showStatus) {
-        setComfyUiStatus('Refreshing workflow files...', 'pending');
-    }
-
-    try {
-        const result = await requestJson('/comfyui/workflows');
-        const select = document.getElementById('comfyui-workflow-file');
-        const preferredValue = (
-            state.currentGenerationConfig?.comfyuiWorkflowFile
-            || select?.dataset.selectedWorkflow
-            || select?.value
-            || ''
-        );
-
-        if (select) {
-            select.innerHTML = '';
-
-            const placeholder = document.createElement('option');
-            placeholder.value = '';
-            placeholder.textContent = 'Select a workflow file from G:\\comfy\\wenjian\\user\\default\\workflows';
-            select.appendChild(placeholder);
-
-            (result.workflows || []).forEach((workflow) => {
-                const option = document.createElement('option');
-                option.value = workflow.name;
-                option.textContent = workflow.name;
-                select.appendChild(option);
-            });
-
-            const selectedValue = (result.workflows || []).some((workflow) => workflow.name === preferredValue)
-                ? preferredValue
-                : '';
-
-            select.value = selectedValue;
-            select.dataset.selectedWorkflow = selectedValue;
-        }
-
-        if (showStatus) {
-            setComfyUiStatus(`Loaded ${(result.workflows || []).length} workflow file(s).`, 'success');
-        }
-
-        saveGenerationSettings();
-        return result;
-    } catch (error) {
-        setComfyUiStatus(error.message, 'error');
-        throw error;
-    }
-}
-
-async function loadSelectedComfyWorkflowFile(showStatus = true, fileName = '') {
-    const workflowSelect = document.getElementById('comfyui-workflow-file');
-    const workflowFile = fileName || workflowSelect?.value || '';
-
-    if (!workflowFile) {
-        if (showStatus) {
-            setComfyUiStatus('Please select a workflow file first.', 'error');
-        }
-        return null;
-    }
-
-    if (showStatus) {
-        setComfyUiStatus(`Loading workflow file: ${workflowFile}`, 'pending');
-    }
-
-    try {
-        const result = await requestJson(`/comfyui/workflows/${encodeURIComponent(workflowFile)}`);
-        const workflowJsonInput = document.getElementById('comfyui-workflow-json');
-        const workflowModeInput = document.getElementById('comfyui-workflow-mode');
-
-        if (workflowJsonInput) {
-            workflowJsonInput.value = result.content || '';
-        }
-
-        if (workflowSelect) {
-            workflowSelect.value = workflowFile;
-            workflowSelect.dataset.selectedWorkflow = workflowFile;
-        }
-
-        if (workflowModeInput) {
-            workflowModeInput.value = 'custom';
-            toggleComfyWorkflowMode();
-        }
-
-        saveGenerationSettings();
-        setComfyUiStatus(`Loaded workflow: ${workflowFile}`, 'success');
-        return result;
-    } catch (error) {
-        setComfyUiStatus(error.message, 'error');
-        throw error;
-    }
-}
-
-async function refreshLiveComfyUIOptions(showStatus = true) {
-    const config = readLiveComfyUIConfig();
-    if (config.imageSource !== 'comfyui') {
-        return null;
-    }
-
-    if (showStatus) {
-        setLiveComfyUiStatus('Refreshing ComfyUI models...', 'pending');
-    }
-
-    try {
-        const params = new URLSearchParams({ comfyuiUrl: config.comfyuiUrl || 'http://127.0.0.1:8000' });
-        const result = await requestJson(`/comfyui/options?${params.toString()}`);
-
-        populateSelect('live-comfyui-model', result.checkpoints || [], config.comfyuiModel);
-        populateSelect('live-comfyui-sampler', result.samplers || [], config.comfyuiSampler);
-        populateSelect('live-comfyui-scheduler', result.schedulers || [], config.comfyuiScheduler);
-
-        if (showStatus) {
-            setLiveComfyUiStatus(`Loaded ${(result.checkpoints || []).length} model(s).`, 'success');
-        }
-
-        syncLiveImageConfigState();
-        return result;
-    } catch (error) {
-        setLiveComfyUiStatus(error.message, 'error');
-        throw error;
-    }
-}
-
-async function refreshLiveComfyWorkflowFiles(showStatus = true) {
-    const config = readLiveComfyUIConfig();
-    if (config.imageSource !== 'comfyui') {
-        return null;
-    }
-
-    if (showStatus) {
-        setLiveComfyUiStatus('Refreshing workflow files...', 'pending');
-    }
-
-    try {
-        const result = await requestJson('/comfyui/workflows');
-        const select = document.getElementById('live-comfyui-workflow-file');
-        const preferredValue = select?.value || config.comfyuiWorkflowFile || '';
-
-        if (select) {
-            select.innerHTML = '';
-            const placeholder = document.createElement('option');
-            placeholder.value = '';
-            placeholder.textContent = 'Select workflow';
-            select.appendChild(placeholder);
-
-            (result.workflows || []).forEach((workflow) => {
-                const option = document.createElement('option');
-                option.value = workflow.name;
-                option.textContent = workflow.name;
-                select.appendChild(option);
-            });
-
-            if ((result.workflows || []).some((workflow) => workflow.name === preferredValue)) {
-                select.value = preferredValue;
-            }
-        }
-
-        if (showStatus) {
-            setLiveComfyUiStatus(`Loaded ${(result.workflows || []).length} workflow file(s).`, 'success');
-        }
-
-        syncLiveImageConfigState();
-        return result;
-    } catch (error) {
-        setLiveComfyUiStatus(error.message, 'error');
-        throw error;
-    }
-}
-
-async function loadSelectedLiveWorkflowFile(showStatus = true, fileName = '') {
-    const workflowSelect = document.getElementById('live-comfyui-workflow-file');
-    const workflowFile = fileName || workflowSelect?.value || '';
-
-    if (!workflowFile) {
-        if (showStatus) {
-            setLiveComfyUiStatus('Please select a workflow file first.', 'error');
-        }
-        return null;
-    }
-
-    if (showStatus) {
-        setLiveComfyUiStatus(`Loading workflow: ${workflowFile}`, 'pending');
-    }
-
-    try {
-        const result = await requestJson(`/comfyui/workflows/${encodeURIComponent(workflowFile)}`);
-        const workflowJsonInput = document.getElementById('live-comfyui-workflow-json');
-        const workflowModeInput = document.getElementById('live-comfyui-workflow-mode');
-
-        if (workflowJsonInput) {
-            workflowJsonInput.value = result.content || '';
-        }
-
-        if (workflowSelect) {
-            workflowSelect.value = workflowFile;
-        }
-
-        if (workflowModeInput) {
-            workflowModeInput.value = 'custom';
-            toggleLiveWorkflowMode();
-        }
-
-        syncLiveImageConfigState();
-        setLiveComfyUiStatus(`Loaded workflow: ${workflowFile}`, 'success');
-        return result;
-    } catch (error) {
-        setLiveComfyUiStatus(error.message, 'error');
-        throw error;
-    }
-}
-
-async function testLiveComfyUIConnection() {
-    setLiveComfyUiStatus('Testing ComfyUI connection...', 'pending');
-
-    try {
-        const result = await requestJson('/comfyui/test', createJsonRequest('POST', readLiveComfyUIConfig()));
-        setLiveComfyUiStatus(`Connection successful. ${(result.checkpoints || []).length} model(s) detected.`, 'success');
-        return result;
-    } catch (error) {
-        setLiveComfyUiStatus(error.message, 'error');
-        throw error;
-    }
-}
-
-async function validateLiveComfyUIWorkflow() {
-    setLiveComfyUiStatus('Validating workflow...', 'pending');
-
-    try {
-        const result = await requestJson('/comfyui/validate-workflow', createJsonRequest('POST', readLiveComfyUIConfig()));
-        const warnings = result.validation?.warnings || [];
-        const message = result.ok
-            ? `Workflow is valid${warnings.length ? `, warnings: ${warnings.join('; ')}` : ''}.`
-            : `Workflow invalid: ${(result.validation?.errors || []).join('; ')}`;
-
-        setLiveComfyUiStatus(message, result.ok ? 'success' : 'error');
-        return result;
-    } catch (error) {
-        setLiveComfyUiStatus(error.message, 'error');
-        throw error;
-    }
-}
-
-async function testComfyUIConnection() {
-    setComfyUiStatus('Testing ComfyUI connection...', 'pending');
-
-    try {
-        const result = await requestJson('/comfyui/test', createJsonRequest('POST', readComfyUIConfig()));
-        const checkpointCount = Array.isArray(result.checkpoints) ? result.checkpoints.length : 0;
-        setComfyUiStatus(`Connection successful. ${checkpointCount} checkpoints detected.`, 'success');
-        return result;
-    } catch (error) {
-        setComfyUiStatus(error.message, 'error');
-        throw error;
-    }
-}
-
-async function validateComfyUIWorkflow() {
-    setComfyUiStatus('Validating workflow...', 'pending');
-
-    try {
-        const result = await requestJson('/comfyui/validate-workflow', createJsonRequest('POST', readComfyUIConfig()));
-        const warnings = result.validation?.warnings || [];
-        const message = result.ok
-            ? `Workflow is valid${warnings.length ? `, warnings: ${warnings.join('; ')}` : ''}.`
-            : `Workflow invalid: ${(result.validation?.errors || []).join('; ')}`;
-
-        setComfyUiStatus(message, result.ok ? 'success' : 'error');
-        return result;
-    } catch (error) {
-        setComfyUiStatus(error.message, 'error');
-        throw error;
-    }
-}
-
-async function finalizeGame() {
-    try {
-        const config = normalizeGenerationConfig(collectGenerationConfig());
-        state.currentGenerationConfig = config;
-        saveGenerationSettings();
-
-        const data = await requestJson(
-            `/generate/${state.currentSessionId}/finalize`,
-            createJsonRequest('POST', { config })
-        );
-
-        state.currentGameId = data.gameId;
-        showScreen('loading-screen');
-        updateProgress(100, '游戏已整合完成', '正在启动游戏...');
-        setTimeout(() => startGame(data.gameId), 500);
-    } catch (error) {
-        console.error('Finalize game error:', error);
-        alert(`整合失败：${error.message}`);
-    }
-}
-
-async function startGame(gameId) {
-    try {
-        const data = await requestJson(`/games/${gameId}/start`, createJsonRequest('POST', {}));
-        state.currentGameId = gameId;
-        state.currentGameData = null;
-        state.gameState = data.gameState;
-        state.sceneImages = [];
-        state.selectedSceneImageIndex = 0;
-        state.activeSceneImage = '';
-        state.transitioningSceneImage = '';
-        state.currentVisualSignature = data.gameState?.visualState?.signature || '';
-        showScreen('game-screen');
-        renderGameState(data.gameState);
-        renderSceneImages([]);
-
-        requestJson(`/games/${gameId}`)
-            .then((result) => {
-                state.currentGameData = result.game || null;
-            })
-            .catch(() => {});
-    } catch (error) {
-        console.error('Start game error:', error);
-        alert(`启动游戏失败：${error.message}`);
-    }
-}
-
-async function sendPlayerAction() {
-    const input = document.getElementById('player-input');
-    const action = input.value.trim();
-
-    if (!action || !state.currentGameId) {
-        return;
-    }
-
-    input.value = '';
-    appendLog('player', action);
-
-    try {
-        const data = await requestJson(
-            `/games/${state.currentGameId}/action`,
-            createJsonRequest('POST', {
-                action,
-                imageConfig: getEffectiveGenerationConfig().imageSource === 'comfyui'
-                    ? { ...getEffectiveGenerationConfig(), ...readLiveComfyUIConfig() }
-                    : getEffectiveGenerationConfig()
-            })
-        );
-
-        appendLog('narrator', data.response || '');
-        renderChoices(data.choices || []);
-        renderGameState(data.gameState);
-        state.currentVisualSignature = data.visualState?.signature || state.currentVisualSignature;
-
-        if (data.sceneImage) {
-            renderSceneImages([data.sceneImage], data.sceneDescription || data.response || '');
-            setSceneImageStatus(
-                data.sceneImageFromCache ? 'Reused cached scene image for the latest visual scene.' : 'Image generated automatically for the latest visual scene.',
-                'success'
-            );
-        } else if (data.visualSceneChanged && getEffectiveGenerationConfig().imageGenerationMode === 'auto') {
-            setSceneImageStatus('Visual scene changed, but no new image was available yet.', 'pending');
-        }
-    } catch (error) {
-        console.error('Send player action error:', error);
-        appendLog('system', `系统提示：${error.message}`);
-    }
-}
-
 async function generateSceneImages() {
     if (!state.currentGameId) {
         setSceneImageStatus('Start the game before generating images.', 'error');
@@ -3001,6 +3168,255 @@ async function generateSceneImages() {
     }
 }
 
+function setSceneImageStatus(message, tone = '') {
+    const status = document.getElementById('scene-image-status');
+    if (!status) {
+        return;
+    }
+
+    status.textContent = message;
+    status.className = `helper-text ${tone}`.trim();
+}
+
+function setSceneImageLoadingState(loading) {
+    const button = document.getElementById('generate-scene-image-btn');
+    if (!button) {
+        return;
+    }
+
+    button.disabled = Boolean(loading);
+    button.textContent = loading ? '生成中...' : '生成场景图';
+}
+
+function syncSceneImageControls() {
+    const controls = document.getElementById('scene-image-controls');
+    const promptInput = document.getElementById('scene-image-prompt');
+    const countInput = document.getElementById('scene-image-count');
+    const livePanel = document.getElementById('live-image-config');
+    const config = getEffectiveGenerationConfig();
+    const imagesEnabled = config.enableImages && config.imageSource !== 'none';
+
+    if (controls) {
+        controls.style.display = imagesEnabled ? 'block' : 'none';
+    }
+
+    if (!imagesEnabled) {
+        setSceneImageStatus('当前未启用图像生成。', 'pending');
+        return;
+    }
+
+    if (promptInput) {
+        const suggestedPrompt = state.lastSuggestedImagePrompt
+            || state.gameState?.sceneDescription
+            || state.gameState?.initialLog
+            || '';
+        if (!promptInput.value.trim() || promptInput.value === state.lastSuggestedImagePrompt) {
+            promptInput.value = suggestedPrompt;
+        }
+        state.lastSuggestedImagePrompt = suggestedPrompt;
+    }
+
+    if (countInput) {
+        countInput.value = String(Math.max(1, Math.min(8, Number(config.comfyuiImageCount) || 1)));
+    }
+
+    if (livePanel) {
+        livePanel.style.display = config.imageSource === 'comfyui' ? 'block' : 'none';
+    }
+
+    if (config.imageGenerationMode === 'auto') {
+        setSceneImageStatus('当前为自动生图模式：视觉场景变化时会自动更新。', 'pending');
+    } else {
+        setSceneImageStatus('当前为手动生图模式：点击按钮后才会生成。', 'pending');
+    }
+}
+
+function renderSceneImages(images = [], prompt = '') {
+    state.sceneImages = Array.isArray(images) ? images : [];
+    state.selectedSceneImageIndex = 0;
+
+    if (prompt) {
+        state.lastSuggestedImagePrompt = prompt;
+    }
+
+    const gallery = document.getElementById('scene-image-gallery');
+    if (gallery) {
+        if (!state.sceneImages.length) {
+            gallery.innerHTML = '';
+        } else {
+            gallery.innerHTML = state.sceneImages
+                .map((image, index) => `
+                    <button
+                        type="button"
+                        class="scene-thumb ${index === state.selectedSceneImageIndex ? 'active' : ''}"
+                        data-scene-thumb="${index}"
+                    >
+                        <img src="${image}" alt="场景候选图 ${index + 1}" />
+                    </button>
+                `)
+                .join('');
+
+            gallery.querySelectorAll('[data-scene-thumb]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const nextIndex = Number(button.getAttribute('data-scene-thumb'));
+                    if (Number.isNaN(nextIndex)) {
+                        return;
+                    }
+                    state.selectedSceneImageIndex = nextIndex;
+                    renderSceneImageStage(state.sceneImages[nextIndex] || '');
+                    gallery.querySelectorAll('[data-scene-thumb]').forEach((item) => {
+                        item.classList.toggle('active', Number(item.getAttribute('data-scene-thumb')) === nextIndex);
+                    });
+                });
+            });
+        }
+    }
+
+    renderSceneImageStage(state.sceneImages[state.selectedSceneImageIndex] || '');
+    const promptInput = document.getElementById('scene-image-prompt');
+    if (promptInput && state.lastSuggestedImagePrompt && !promptInput.value.trim()) {
+        promptInput.value = state.lastSuggestedImagePrompt;
+    }
+}
+
+function renderSceneImageStage(nextImage = '') {
+    const imageContainer = document.getElementById('scene-image');
+    if (!imageContainer) {
+        return;
+    }
+
+    if (!nextImage) {
+        state.activeSceneImage = '';
+        state.transitioningSceneImage = '';
+        imageContainer.innerHTML = '<div class="placeholder">场景图像将在这里显示</div>';
+        return;
+    }
+
+    if (!state.activeSceneImage) {
+        state.activeSceneImage = nextImage;
+        state.transitioningSceneImage = '';
+        imageContainer.innerHTML = `
+            <div class="scene-image-layer is-active">
+                <img src="${nextImage}" alt="场景图" />
+            </div>
+        `;
+        return;
+    }
+
+    if (state.activeSceneImage === nextImage) {
+        imageContainer.innerHTML = `
+            <div class="scene-image-layer is-active">
+                <img src="${nextImage}" alt="场景图" />
+            </div>
+        `;
+        return;
+    }
+
+    state.transitioningSceneImage = nextImage;
+    state.sceneImageTransitionToken += 1;
+    const transitionToken = state.sceneImageTransitionToken;
+    const preloadImage = new Image();
+
+    preloadImage.onload = () => {
+        if (state.sceneImageTransitionToken !== transitionToken) {
+            return;
+        }
+
+        imageContainer.innerHTML = `
+            <div class="scene-image-layer scene-image-layer-back is-active">
+                <img src="${state.activeSceneImage}" alt="当前场景图" />
+            </div>
+            <div class="scene-image-layer scene-image-layer-front">
+                <img src="${nextImage}" alt="下一场景图" />
+            </div>
+        `;
+
+        const frontLayer = imageContainer.querySelector('.scene-image-layer-front');
+        requestAnimationFrame(() => {
+            frontLayer?.classList.add('is-active');
+        });
+
+        window.setTimeout(() => {
+            if (state.sceneImageTransitionToken !== transitionToken) {
+                return;
+            }
+
+            state.activeSceneImage = nextImage;
+            state.transitioningSceneImage = '';
+            imageContainer.innerHTML = `
+                <div class="scene-image-layer is-active">
+                    <img src="${nextImage}" alt="场景图" />
+                </div>
+            `;
+        }, 420);
+    };
+
+    preloadImage.onerror = () => {
+        if (state.sceneImageTransitionToken !== transitionToken) {
+            return;
+        }
+
+        state.activeSceneImage = nextImage;
+        state.transitioningSceneImage = '';
+        imageContainer.innerHTML = `
+            <div class="scene-image-layer is-active">
+                <img src="${nextImage}" alt="场景图" />
+            </div>
+        `;
+    };
+
+    preloadImage.src = nextImage;
+}
+
+function buildRuntimeSnapshot(gameState = state.gameState) {
+    if (!gameState) {
+        return null;
+    }
+
+    return {
+        chapterId: gameState.currentChapter ?? null,
+        sceneNodeId: gameState.currentScene || null,
+        plotBeatId: gameState.turn ?? null,
+        playerState: gameState.player || {},
+        worldState: gameState.worldState || {},
+        relationshipState: gameState.characterStates || [],
+        inventory: gameState.inventory || [],
+        activeQuests: (gameState.quests || []).filter((item) => item && item.completed !== true),
+        visualState: gameState.visualState || null,
+        history: (gameState.history || []).slice(-20)
+    };
+}
+
+function scheduleRuntimeSnapshotPersist() {
+    if (!state.currentProjectId || !state.gameState) {
+        return;
+    }
+
+    if (state.runtimeSnapshotSaving) {
+        return;
+    }
+
+    if (state.runtimeSnapshotTimer) {
+        window.clearTimeout(state.runtimeSnapshotTimer);
+    }
+
+    state.runtimeSnapshotTimer = window.setTimeout(async () => {
+        state.runtimeSnapshotSaving = true;
+        try {
+            await requestJson(
+                `/projects/${state.currentProjectId}/runtime-snapshot`,
+                createJsonRequest('POST', {
+                    runtimeSnapshot: buildRuntimeSnapshot(state.gameState)
+                })
+            );
+        } catch (error) {
+            console.warn('Runtime snapshot save failed:', error.message);
+        } finally {
+            state.runtimeSnapshotSaving = false;
+        }
+    }, 800);
+}
+
 function renderGameState(gameState = state.gameState) {
     if (!gameState) {
         return;
@@ -3020,6 +3436,7 @@ function renderGameState(gameState = state.gameState) {
     renderInventory(gameState.inventory || []);
     renderQuests(gameState.quests || []);
     syncSceneImageControls();
+    scheduleRuntimeSnapshotPersist();
 }
 
 async function testConnection(source) {
@@ -3054,3 +3471,4 @@ function escapeHtml(value) {
         .replaceAll('<', '&lt;')
         .replaceAll('>', '&gt;');
 }
+

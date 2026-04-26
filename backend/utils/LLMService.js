@@ -1,9 +1,12 @@
 ﻿const OpenAI = require('openai');
+const CacheService = require('./CacheService');
+const CostTracker = require('./CostTracker');
 
 class LLMService {
     constructor() {
         this.client = null;
         this.settings = null;
+        this.cache = new CacheService({ maxSize: 500, ttl: 1800000 }); // 30分钟缓存
     }
 
     initialize(settings) {
@@ -63,16 +66,134 @@ class LLMService {
         }
     }
 
-    async generateJSON(prompt) {
+    async generateJSON(prompt, options = {}) {
+        // 检查缓存
+        const cacheKey = this.cache.generateKey(prompt, {
+            model: this.settings?.model,
+            temperature: 0.7
+        });
+
+        if (!options.skipCache) {
+            const cached = this.cache.get(cacheKey);
+            if (cached) {
+                console.log('使用缓存结果');
+                return cached;
+            }
+        }
+
         const jsonPrompt = `${prompt}\n\n请只返回有效的 JSON，不要包含代码块、解释或额外文字。确保结果可以被直接解析。`;
         const response = await this.generateText(jsonPrompt, { maxTokens: 8000, temperature: 0.7 });
 
         try {
-            return this.extractAndParseJSON(response);
+            const result = this.extractAndParseJSON(response);
+            // 缓存结果
+            this.cache.set(cacheKey, result);
+            return result;
         } catch (error) {
             console.error('JSON parse error:', error);
             console.error('Raw response:', response);
             return { error: `无法解析 AI 响应：${error.message}`, raw: response };
+        }
+    }
+
+    /**
+     * 流式生成 JSON（新增）
+     */
+    async generateJSONStreaming(prompt, onChunk) {
+        const jsonPrompt = `${prompt}\n\n请只返回有效的 JSON，不要包含代码块、解释或额外文字。确保结果可以被直接解析。`;
+
+        if (!this.client) {
+            this.initialize(this.getDefaultSettings());
+        }
+
+        const model = this.settings?.model || 'gpt-4o';
+
+        try {
+            if (this.client.type === 'anthropic') {
+                // Anthropic 暂不支持流式，回退到普通模式
+                const result = await this.generateJSON(prompt);
+                onChunk(JSON.stringify(result));
+                return result;
+            }
+
+            const stream = await this.client.chat.completions.create({
+                model: this.settings?.model || model,
+                messages: [{ role: 'user', content: jsonPrompt }],
+                max_tokens: 8000,
+                temperature: 0.7,
+                stream: true
+            });
+
+            let fullText = '';
+            let lastValidJSON = null;
+
+            for await (const chunk of stream) {
+                const content = chunk.choices[0]?.delta?.content || '';
+                fullText += content;
+
+                // 尝试解析部分 JSON
+                try {
+                    const parsed = this.extractAndParseJSON(fullText);
+                    lastValidJSON = parsed;
+                    onChunk(parsed);
+                } catch (e) {
+                    // 还没有完整的 JSON，继续
+                }
+            }
+
+            // 返回最终结果
+            if (lastValidJSON) {
+                return lastValidJSON;
+            }
+
+            return this.extractAndParseJSON(fullText);
+        } catch (error) {
+            console.error('LLM streaming error:', error);
+            throw new Error(`AI 流式生成失败：${error.message}`);
+        }
+    }
+
+    /**
+     * 流式生成文本（新增）
+     */
+    async generateTextStreaming(prompt, onChunk, options = {}) {
+        if (!this.client) {
+            this.initialize(this.getDefaultSettings());
+        }
+
+        const model = this.settings?.model || 'gpt-4o';
+        const maxTokens = options.maxTokens || 2000;
+
+        try {
+            if (this.client.type === 'anthropic') {
+                // Anthropic 暂不支持流式，回退到普通模式
+                const result = await this.generateText(prompt, options);
+                onChunk(result);
+                return result;
+            }
+
+            const stream = await this.client.chat.completions.create({
+                model: this.settings?.model || model,
+                messages: [{ role: 'user', content: prompt }],
+                max_tokens: maxTokens,
+                temperature: options.temperature || 0.8,
+                stream: true
+            });
+
+            let fullText = '';
+
+            for await (const chunk of stream) {
+                const content = chunk.choices[0]?.delta?.content || '';
+                if (content) {
+                    fullText += content;
+                    onChunk(content);
+                }
+            }
+
+            return fullText;
+        } catch (error) {
+            console.error('LLM streaming error:', error);
+            throw new Error(`AI 流式生成失败：${error.message}`);
         }
     }
 
@@ -264,6 +385,20 @@ class LLMService {
             apiKey: process.env.OPENAI_API_KEY,
             model: process.env.OPENAI_MODEL || 'gpt-4o'
         };
+    }
+
+    /**
+     * 获取缓存统计
+     */
+    getCacheStats() {
+        return this.cache.getStats();
+    }
+
+    /**
+     * 清空缓存
+     */
+    clearCache() {
+        this.cache.clear();
     }
 }
 

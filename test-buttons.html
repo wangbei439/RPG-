@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>按钮测试</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 2rem;
+            background: #0f172a;
+            color: white;
+        }
+        .hero {
+            text-align: center;
+            padding: 4rem 2rem 3rem;
+            background: linear-gradient(135deg, #4f46e5, #ec4899);
+            position: relative;
+            overflow: hidden;
+        }
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(circle at 30% 50%, rgba(99, 102, 241, 0.3), transparent 50%);
+            pointer-events: none;
+        }
+        .hero-title {
+            font-size: 3rem;
+            font-weight: 900;
+            color: white;
+            margin-bottom: 1rem;
+            position: relative;
+            z-index: 1;
+        }
+        .hero-subtitle {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 1.25rem;
+            margin-bottom: 2.5rem;
+            position: relative;
+            z-index: 1;
+        }
+        .hero-cta {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            position: relative;
+            z-index: 1;
+        }
+        .btn-primary-large {
+            background: white;
+            color: #4f46e5;
+            border: none;
+            padding: 1rem 2.5rem;
+            font-size: 1.125rem;
+            font-weight: 600;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        .btn-primary-large:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        }
+        .btn-secondary-large {
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            padding: 1rem 2rem;
+            font-size: 1.125rem;
+            font-weight: 600;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+            backdrop-filter: blur(10px);
+        }
+        .btn-secondary-large:hover {
+            background: rgba(255, 255, 255, 0.25);
+            border-color: rgba(255, 255, 255, 0.5);
+            transform: translateY(-2px);
+        }
+        .result {
+            margin-top: 2rem;
+            padding: 1rem;
+            background: #1e293b;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <h1>按钮点击测试</h1>
+
+    <div class="hero">
+        <h1 class="hero-title">3 分钟创建你的 AI RPG 游戏</h1>
+        <p class="hero-subtitle">无需编程，AI 帮你生成完整的角色扮演游戏</p>
+        <div class="hero-cta">
+            <button id="quick-start-btn" class="btn-primary-large">快速开始</button>
+            <button id="browse-examples-btn" class="btn-secondary-large">浏览示例</button>
+            <button id="import-novel-btn" class="btn-secondary-large">导入小说</button>
+        </div>
+    </div>
+
+    <div class="result" id="result">
+        等待点击...
+    </div>
+
+    <script>
+        const result = document.getElementById('result');
+
+        document.getElementById('quick-start-btn')?.addEventListener('click', () => {
+            result.textContent = '✅ 快速开始按钮被点击了！';
+            result.style.background = '#22c55e';
+        });
+
+        document.getElementById('browse-examples-btn')?.addEventListener('click', () => {
+            result.textContent = '✅ 浏览示例按钮被点击了！';
+            result.style.background = '#3b82f6';
+        });
+
+        document.getElementById('import-novel-btn')?.addEventListener('click', () => {
+            result.textContent = '✅ 导入小说按钮被点击了！';
+            result.style.background = '#f59e0b';
+        });
+
+        console.log('按钮事件监听器已绑定');
+        console.log('快速开始按钮:', document.getElementById('quick-start-btn'));
+        console.log('浏览示例按钮:', document.getElementById('browse-examples-btn'));
+        console.log('导入小说按钮:', document.getElementById('import-novel-btn'));
+    </script>
+</body>
+</html>

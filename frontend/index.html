@@ -3,21 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RPG Generator - AI一键生成RPG游戏</title>
+    <title>叙游工坊 - AI一键生成角色扮演游戏</title>
     <link rel="stylesheet" href="/src/styles/main.css">
 </head>
 <body>
     <div id="app">
         <!-- 首页 - 游戏类型选择 -->
         <section id="home-screen" class="screen active">
-            <header class="main-header">
-                <h1>🎮 RPG Generator</h1>
-                <p class="subtitle">AI驱动的一键式RPG游戏生成器</p>
-            </header>
-            
             <div class="config-bar">
                 <button id="settings-btn" class="icon-btn" title="设置">⚙️</button>
                 <button id="load-saved-games-btn" class="icon-btn" title="读取存档">📂 读取存档</button>
+            </div>
+
+            <!-- Hero 区域 -->
+            <div class="hero">
+                <h1 class="hero-title">3 分钟创建你的 AI RPG 游戏</h1>
+                <p class="hero-subtitle">无需编程，AI 帮你生成完整的角色扮演游戏</p>
+                <div class="hero-cta">
+                    <button id="quick-start-btn" class="btn-primary-large">快速开始</button>
+                    <button id="browse-examples-btn" class="btn-secondary-large">浏览示例</button>
+                    <button id="import-novel-btn" class="btn-secondary-large">导入小说</button>
+                </div>
+            </div>
+
+            <!-- 示例游戏展示 -->
+            <div id="examples-section" class="examples-section" style="display: none;">
+                <h2 class="section-title">✨ 精选示例游戏</h2>
+                <div class="examples-grid" id="examples-grid">
+                    <!-- 示例游戏卡片将在这里动态生成 -->
+                </div>
+                <button id="close-examples" class="btn-text">返回首页</button>
             </div>
 
             <!-- 存档列表区域（默认隐藏） -->
@@ -29,8 +44,8 @@
                 <button id="close-saved-games" class="btn-secondary">关闭</button>
             </div>
 
-            <div class="game-types">
-                <h2>选择RPG游戏类型</h2>
+            <div class="game-types" id="game-types-section">
+                <h2 class="section-title">选择游戏类型</h2>
                 <div class="type-grid">
                     <div class="type-card" data-type="adventure">
                         <div class="type-icon">⚔️</div>
@@ -82,9 +97,6 @@
                         <h3>自定义</h3>
                         <p>完全自定义你的RPG游戏</p>
                     </div>
-                </div>
-                <div class="home-actions">
-                    <button id="open-import-screen" type="button" class="generate-btn secondary-action">导入小说或长文本改编</button>
                 </div>
             </div>
         </section>
@@ -138,8 +150,8 @@
                 <div class="form-group image-config" id="image-config">
                     <label for="image-source">图像来源</label>
                     <select id="image-source">
-                        <option value="comfyui">ComfyUI (本地)</option>
-                        <option value="api">API服务</option>
+                        <option value="comfyui">ComfyUI（本地）</option>
+                        <option value="api">接口服务</option>
                         <option value="none">不使用图像</option>
                     </select>
 
@@ -176,8 +188,8 @@
                     <div class="form-group">
                         <label for="import-game-type">改编类型</label>
                         <select id="import-game-type">
-                            <option value="custom" selected>自定义剧情 RPG</option>
-                            <option value="adventure">冒险 RPG</option>
+                        <option value="custom" selected>自定义剧情游戏</option>
+                        <option value="adventure">冒险 RPG</option>
                             <option value="mystery">推理解谜</option>
                             <option value="romance">恋爱模拟</option>
                             <option value="fantasy">奇幻魔法</option>
@@ -202,10 +214,51 @@
                     <textarea id="import-content" rows="14" placeholder="粘贴小说正文、剧本、设定集或任意长文本。系统会先解析出章节、角色、地点和剧情骨架，再进入现有的分步生成流程。"></textarea>
                 </div>
 
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="use-smart-parse" checked />
+                        <span>使用 AI 智能解析（推荐）</span>
+                    </label>
+                    <p class="hint">AI 会智能识别章节、角色、关系和剧情，比简单的正则匹配更准确。关闭后使用快速模式。</p>
+                </div>
+
+                <div id="import-progress" class="import-progress" style="display: none;">
+                    <div class="progress-bar">
+                        <div id="import-progress-fill" class="progress-fill"></div>
+                    </div>
+                    <div id="import-progress-text" class="progress-text">准备导入...</div>
+                </div>
+
                 <div id="import-status" class="helper-text">导入后会自动创建项目，并预填到现有生成流程中。</div>
 
-                <button type="submit" class="generate-btn">开始导入并改编</button>
+                <button type="submit" id="import-submit-btn" class="generate-btn">开始导入并改编</button>
             </form>
+
+            <section class="import-history" id="import-package-import">
+                <div class="import-history-header">
+                    <h3>导入项目包</h3>
+                </div>
+                <div class="import-project-card">
+                    <div class="import-project-main">
+                        <strong>支持导入导出的 `.json` 项目包</strong>
+                        <p>导入后会恢复故事、改编策略、视觉资产索引与运行时快照。</p>
+                    </div>
+                    <div class="import-project-actions">
+                        <input id="import-package-file" type="file" accept=".json,application/json" />
+                        <button id="import-package-btn" type="button" class="preview-inline-btn">导入项目包</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="import-history" id="import-history">
+                <div class="import-history-header">
+                    <h3>最近导入项目</h3>
+                    <button id="refresh-import-projects" type="button" class="preview-inline-btn">刷新列表</button>
+                </div>
+                <div id="import-project-list" class="import-project-list">
+                    <p class="empty-hint">正在加载项目列表...</p>
+                </div>
+            </section>
         </section>
 
         <section id="import-preview-screen" class="screen">
@@ -397,17 +450,17 @@
                         <div class="form-group">
                             <label for="llm-source">LLM来源</label>
                             <select id="llm-source">
-                                <option value="openai">OpenAI API</option>
-                                <option value="anthropic">Anthropic API</option>
-                                <option value="local">本地模型 (Ollama)</option>
-                                <option value="custom">自定义API</option>
+                                <option value="openai">OpenAI 接口</option>
+                                <option value="anthropic">Anthropic 接口</option>
+                                <option value="local">本地模型（Ollama）</option>
+                                <option value="custom">自定义接口</option>
                             </select>
                         </div>
 
                         <div id="openai-config" class="api-config">
-                            <input type="text" id="openai-url" placeholder="API地址 (默认: https://api.openai.com/v1)" />
-                            <input type="password" id="openai-key" placeholder="OpenAI API密钥" />
-                            <input type="text" id="openai-model" placeholder="模型 (默认: gpt-4o)" value="gpt-4o" />
+                            <input type="text" id="openai-url" placeholder="接口地址（默认：https://api.openai.com/v1）" />
+                            <input type="password" id="openai-key" placeholder="OpenAI 密钥" />
+                            <input type="text" id="openai-model" placeholder="模型（默认：gpt-4o）" value="gpt-4o" />
                             <div class="api-test-row">
                                 <button id="test-openai-btn" class="test-btn">🔗 测试连接</button>
                                 <span id="test-openai-result" class="test-result"></span>
@@ -415,8 +468,8 @@
                         </div>
 
                         <div id="anthropic-config" class="api-config" style="display:none">
-                            <input type="password" id="anthropic-key" placeholder="Anthropic API密钥" />
-                            <input type="text" id="anthropic-model" placeholder="模型 (默认: claude-3-5-sonnet-20241022)" value="claude-3-5-sonnet-20241022" />
+                            <input type="password" id="anthropic-key" placeholder="Anthropic 密钥" />
+                            <input type="text" id="anthropic-model" placeholder="模型（默认：claude-3-5-sonnet-20241022）" value="claude-3-5-sonnet-20241022" />
                             <div class="api-test-row">
                                 <button id="test-anthropic-btn" class="test-btn">🔗 测试连接</button>
                                 <span id="test-anthropic-result" class="test-result"></span>
@@ -424,8 +477,8 @@
                         </div>
 
                         <div id="local-config" class="api-config" style="display:none">
-                            <input type="text" id="ollama-url" placeholder="Ollama地址 (默认: http://localhost:11434)" value="http://localhost:11434" />
-                            <input type="text" id="ollama-model" placeholder="模型 (默认: llama3)" value="llama3" />
+                            <input type="text" id="ollama-url" placeholder="Ollama 地址（默认：http://localhost:11434）" value="http://localhost:11434" />
+                            <input type="text" id="ollama-model" placeholder="模型（默认：llama3）" value="llama3" />
                             <div class="api-test-row">
                                 <button id="test-local-btn" class="test-btn">🔗 测试连接</button>
                                 <span id="test-local-result" class="test-result"></span>
@@ -433,8 +486,8 @@
                         </div>
 
                         <div id="custom-config" class="api-config" style="display:none">
-                            <input type="text" id="custom-url" placeholder="自定义API地址" />
-                            <input type="password" id="custom-key" placeholder="API密钥 (可选)" />
+                            <input type="text" id="custom-url" placeholder="自定义接口地址" />
+                            <input type="password" id="custom-key" placeholder="接口密钥（可选）" />
                             <input type="text" id="custom-model" placeholder="模型名称" />
                             <div class="api-test-row">
                                 <button id="test-custom-btn" class="test-btn">🔗 测试连接</button>
