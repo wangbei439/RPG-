@@ -20,6 +20,9 @@ FROM node:20-alpine
 LABEL maintainer="RPG Generator"
 LABEL description="AI-powered RPG Game Generator"
 
+# Create non-root user for security
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
 WORKDIR /app
 
 # Copy backend with node_modules
@@ -28,14 +31,17 @@ COPY --from=backend-builder /app/backend ./backend
 # Copy built frontend to backend/public
 COPY --from=frontend-builder /app/frontend/dist ./backend/public
 
-# Create data directory
-RUN mkdir -p /app/backend/data
+# Create data directory with proper ownership
+RUN mkdir -p /app/backend/data && chown -R appuser:appgroup /app/backend/data
 
 # Set environment defaults
 ENV PORT=3000
 ENV NODE_ENV=production
 
 EXPOSE 3000
+
+# Switch to non-root user
+USER appuser
 
 WORKDIR /app/backend
 CMD ["node", "server.js"]

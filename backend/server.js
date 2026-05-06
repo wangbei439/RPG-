@@ -43,7 +43,15 @@ const PROJECT_STORE_DIR = path.join(__dirname, 'data', 'projects');
 // Trust proxy for correct IP in rate limiting (needed behind reverse proxy)
 app.set('trust proxy', 1);
 
-app.use(cors());
+// Configure CORS - restrict origins in production
+const corsOptions = {
+    origin: process.env.CORS_ORIGIN || '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+    maxAge: 86400 // Preflight cache: 24 hours
+};
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -148,6 +156,10 @@ app.use('/', createProjectRoutes(dependencies));
 app.use('/', createComfyuiRoutes(dependencies));
 app.use('/', createSystemRoutes(dependencies));
 
+// Global error handler (must be after all routes)
+const errorHandler = require('./middleware/errorHandler');
+app.use(errorHandler);
+
 // Cleanup interval
 setInterval(cleanupExpiredRecords, CLEANUP_INTERVAL);
 
@@ -204,7 +216,88 @@ const server = http.createServer(app);
 // 初始化 WebSocket 服务器
 initWebSocket(server);
 
+// ---------------------------------------------------------------------------
+// In-memory state size limits
+// ---------------------------------------------------------------------------
+const MAX_GAMES = parseInt(process.env.MAX_GAMES, 10) || 500;
+const MAX_SESSIONS = parseInt(process.env.MAX_SESSIONS, 10) || 200;
+const MAX_SCENE_CACHE = parseInt(process.env.MAX_SCENE_CACHE, 10) || 1000;
+
+function enforceMapLimit(map, maxItems, label) {
+    if (map.size <= maxItems) return;
+    // Evict oldest entries (first inserted)
+    const evictCount = map.size - maxItems;
+    let evicted = 0;
+    for (const key of map.keys()) {
+        if (evicted >= evictCount) break;
+        map.delete(key);
+        evicted++;
+    }
+    console.warn(`[Memory] ${label} exceeded limit (${map.size + evicted} > ${maxItems}), evicted ${evicted} entries`);
+}
+
+// Periodic memory enforcement
+setInterval(() => {
+    enforceMapLimit(games, MAX_GAMES, 'games');
+    enforceMapLimit(generationSessions, MAX_SESSIONS, 'generationSessions');
+    enforceMapLimit(sceneImageCache, MAX_SCENE_CACHE, 'sceneImageCache');
+}, 5 * 60 * 1000); // Every 5 minutes
+
+// ---------------------------------------------------------------------------
+// Start server
+// ---------------------------------------------------------------------------
 server.listen(PORT, () => {
     console.log(`RPG Generator Backend running on http://localhost:${PORT}`);
     console.log(`WebSocket available at ws://localhost:${PORT}/ws`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    if (process.env.AUTH_DISABLED === 'true' && process.env.NODE_ENV !== 'production') {
+        console.warn('[SECURITY] Auth is DISABLED (AUTH_DISABLED=true). Do not use in production!');
+    }
+});
+
+// ---------------------------------------------------------------------------
+// Graceful shutdown
+// ---------------------------------------------------------------------------
+function gracefulShutdown(signal) {
+    console.log(`\n[Shutdown] Received ${signal}. Shutting down gracefully...`);
+
+    // Stop accepting new connections
+    server.close(() => {
+        console.log('[Shutdown] HTTP server closed.');
+
+        // Close database connection
+        try {
+            db.closeDatabase();
+            console.log('[Shutdown] Database connection closed.');
+        } catch (err) {
+            console.error('[Shutdown] Error closing database:', err.message);
+        }
+
+        // Clear intervals
+        clearInterval(cleanupInterval);
+        console.log('[Shutdown] Cleanup intervals cleared.');
+
+        console.log('[Shutdown] Complete. Exiting.');
+        process.exit(0);
+    });
+
+    // Force exit after 10 seconds if graceful shutdown hangs
+    setTimeout(() => {
+        console.error('[Shutdown] Forced exit after 10s timeout.');
+        process.exit(1);
+    }, 10000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Handle uncaught exceptions and unhandled rejections
+process.on('uncaughtException', (err) => {
+    console.error('[FATAL] Uncaught Exception:', err);
+    gracefulShutdown('uncaughtException');
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
+    gracefulShutdown('unhandledRejection');
 });

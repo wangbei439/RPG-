@@ -4,6 +4,8 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { createHttpError, asyncRoute, sendSseEvent, createProgressSender, buildSceneCacheKey, buildRuntimeImagePayload } = require('./helpers');
 const { getExampleGamesList, getExampleGame } = require('../templates/ExampleGames');
+const { validateBody, schemas } = require('../middleware/validate');
+const logger = require('../middleware/logger');
 
 module.exports = function({
     games, generationSessions, projects, projectStore, generator, imageService,
@@ -19,30 +21,28 @@ module.exports = function({
     // -----------------------------------------------------------------------
     // POST /api/generate  — legacy one-shot generation (SSE)
     // -----------------------------------------------------------------------
-    router.post('/generate', async (req, res) => {
+    router.post('/generate', asyncRoute('Generation error', async (req, res) => {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
 
         const sendProgress = createProgressSender(res);
 
-        try {
-            const config = req.body;
-            const gameId = uuidv4();
-            sendProgress(5, '正在初始化生成器...', '正在加载模型配置');
+        const config = req.body;
+        const gameId = uuidv4();
+        sendProgress(5, '正在初始化生成器...', '正在加载模型配置');
 
-            const gameData = await generator.generateGame(config, sendProgress);
-            setGameRecord(gameId, config, gameData);
+        const gameData = await generator.generateGame(config, sendProgress);
+        setGameRecord(gameId, config, gameData);
 
-            sendProgress(100, '游戏生成完成', `游戏 ID：${gameId}`);
-            sendSseEvent(res, { type: 'complete', gameId });
-            res.end();
-        } catch (error) {
-            console.error('Generation error:', error);
-            sendSseEvent(res, { type: 'error', message: error.message || '生成失败' });
-            res.end();
-        }
-    });
+        sendProgress(100, '游戏生成完成', `游戏 ID：${gameId}`);
+        sendSseEvent(res, { type: 'complete', gameId });
+        res.end();
+    }, (error, req, res) => {
+        // Custom SSE error handler
+        sendSseEvent(res, { type: 'error', message: error.message || '生成失败' });
+        res.end();
+    }));
 
     // -----------------------------------------------------------------------
     // POST /api/games/:gameId/start
@@ -168,7 +168,7 @@ module.exports = function({
 
                     if (cachedImage) {
                         // 缓存命中，通过 WebSocket 推送图像
-                        console.log('图像缓存命中');
+                        logger.debug('Scene image cache hit');
                         broadcastImageReady(game.id, {
                             imageUrl: cachedImage.url || cachedImage.imageUrl || cachedImage,
                             prompt: imagePrompt,
@@ -182,7 +182,7 @@ module.exports = function({
                         if (sceneImage) {
                             sceneImageCache.set(cacheKey, sceneImage);
                             // 通过 WebSocket 推送图像生成完成
-                            console.log('图像生成完成');
+                            logger.debug('Scene image generation complete');
                             broadcastImageReady(game.id, {
                                 imageUrl: sceneImage.url || sceneImage.imageUrl || sceneImage,
                                 prompt: imagePrompt,
@@ -191,7 +191,7 @@ module.exports = function({
                         }
                     }
                 } catch (imageError) {
-                    console.warn('后台图像生成失败:', imageError.message);
+                    logger.warn('Background image generation failed', { error: imageError.message });
                 }
             })();
 

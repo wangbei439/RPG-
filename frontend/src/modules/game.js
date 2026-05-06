@@ -6,7 +6,7 @@ import { requestJson, createJsonRequest } from '../services/api.js';
 import { collectGenerationConfig } from '../services/settings.js';
 import { getGameWebSocket } from '../services/websocket.js';
 import { state, API_BASE, GENERATION_SETTINGS_KEY } from './state.js';
-import { escapeHtml, normalizeGenerationConfig, getEffectiveGenerationConfig } from './utils.js';
+import { escapeHtml, escapeAttribute, normalizeGenerationConfig, getEffectiveGenerationConfig } from './utils.js';
 import { showScreen } from './navigation.js';
 import { saveGenerationSettings, buildSavedGameRecord, readSavedGameRecord, loadSavedGame } from './saved-games.js';
 import { showToast } from '../services/toast.js';
@@ -866,7 +866,7 @@ export function renderSceneImages(images = [], prompt = '') {
                         class="scene-thumb ${index === state.selectedSceneImageIndex ? 'active' : ''}"
                         data-scene-thumb="${index}"
                     >
-                        <img src="${image}" alt="场景候选图 ${index + 1}" />
+                        <img src="${escapeAttribute(image)}" alt="场景候选图 ${index + 1}" />
                     </button>
                 `)
                 .join('');
@@ -912,7 +912,7 @@ function renderSceneImageStage(nextImage = '') {
         state.transitioningSceneImage = '';
         imageContainer.innerHTML = `
             <div class="scene-image-layer is-active">
-                <img src="${nextImage}" alt="场景图" />
+                <img src="${escapeAttribute(nextImage)}" alt="场景图" />
             </div>
         `;
         return;
@@ -921,7 +921,7 @@ function renderSceneImageStage(nextImage = '') {
     if (state.activeSceneImage === nextImage) {
         imageContainer.innerHTML = `
             <div class="scene-image-layer is-active">
-                <img src="${nextImage}" alt="场景图" />
+                <img src="${escapeAttribute(nextImage)}" alt="场景图" />
             </div>
         `;
         return;
@@ -939,10 +939,10 @@ function renderSceneImageStage(nextImage = '') {
 
         imageContainer.innerHTML = `
             <div class="scene-image-layer scene-image-layer-back is-active">
-                <img src="${state.activeSceneImage}" alt="当前场景图" />
+                <img src="${escapeAttribute(state.activeSceneImage)}" alt="当前场景图" />
             </div>
             <div class="scene-image-layer scene-image-layer-front">
-                <img src="${nextImage}" alt="下一场景图" />
+                <img src="${escapeAttribute(nextImage)}" alt="下一场景图" />
             </div>
         `;
 
@@ -960,7 +960,7 @@ function renderSceneImageStage(nextImage = '') {
             state.transitioningSceneImage = '';
             imageContainer.innerHTML = `
                 <div class="scene-image-layer is-active">
-                    <img src="${nextImage}" alt="场景图" />
+                    <img src="${escapeAttribute(nextImage)}" alt="场景图" />
                 </div>
             `;
         }, 420);
@@ -975,7 +975,7 @@ function renderSceneImageStage(nextImage = '') {
         state.transitioningSceneImage = '';
         imageContainer.innerHTML = `
             <div class="scene-image-layer is-active">
-                <img src="${nextImage}" alt="场景图" />
+                <img src="${escapeAttribute(nextImage)}" alt="场景图" />
             </div>
         `;
     };

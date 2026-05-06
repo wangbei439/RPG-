@@ -3,6 +3,43 @@ const configuredApiBase = window.localStorage.getItem('rpg_generator_api_base') 
 
 export const API_BASE = (configuredApiBase || defaultApiBase).replace(/\/$/, '');
 
+// --- Auth token management ---
+
+const AUTH_TOKEN_KEY = 'rpg_auth_token';
+
+/**
+ * Get the stored JWT token (if any).
+ */
+export function getAuthToken() {
+    return window.localStorage.getItem(AUTH_TOKEN_KEY) || '';
+}
+
+/**
+ * Store a JWT token after successful login.
+ */
+export function setAuthToken(token) {
+    if (token) {
+        window.localStorage.setItem(AUTH_TOKEN_KEY, token);
+    } else {
+        window.localStorage.removeItem(AUTH_TOKEN_KEY);
+    }
+}
+
+/**
+ * Build common fetch options with optional auth header.
+ */
+function buildOptions(options = {}) {
+    const token = getAuthToken();
+    if (token) {
+        const headers = {
+            ...(options.headers || {}),
+            'Authorization': `Bearer ${token}`
+        };
+        return { ...options, headers };
+    }
+    return options;
+}
+
 async function parseErrorMessage(response) {
     try {
         const payload = await response.json();
@@ -13,7 +50,7 @@ async function parseErrorMessage(response) {
 }
 
 export async function requestJson(path, options = {}) {
-    const response = await fetch(`${API_BASE}${path}`, options);
+    const response = await fetch(`${API_BASE}${path}`, buildOptions(options));
 
     if (!response.ok) {
         throw new Error(await parseErrorMessage(response));
@@ -23,19 +60,19 @@ export async function requestJson(path, options = {}) {
 }
 
 export async function requestJsonWithProgress(path, options = {}, onProgress = null) {
-    const response = await fetch(`${API_BASE}${path}`, options);
+    const response = await fetch(`${API_BASE}${path}`, buildOptions(options));
 
     if (!response.ok) {
         throw new Error(await parseErrorMessage(response));
     }
 
-    // 检查是否是 SSE 响应
+    // Check for SSE response
     const contentType = response.headers.get('content-type');
     if (contentType && contentType.includes('text/event-stream')) {
         return await handleSSEResponse(response, onProgress);
     }
 
-    // 普通 JSON 响应
+    // Normal JSON response
     return response.json();
 }
 
@@ -84,9 +121,10 @@ async function handleSSEResponse(response, onProgress) {
 }
 
 export function createJsonRequest(method, body) {
-    return {
+    const options = {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
     };
+    return buildOptions(options);
 }

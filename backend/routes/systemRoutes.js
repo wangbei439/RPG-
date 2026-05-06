@@ -40,18 +40,36 @@ module.exports = function({
 
     // -----------------------------------------------------------------------
     // POST /api/test-connection
+    // Tests LLM connection with provided configuration.
+    // Only the necessary fields are extracted from the request body
+    // to avoid logging or caching unnecessary data.
     // -----------------------------------------------------------------------
     router.post('/test-connection', asyncRoute('Test connection error', async (req, res) => {
+        const { llmSource, apiKey, apiUrl, model, ollamaUrl, ollamaModel } = req.body || {};
+
         const llm = new LLMService();
-        llm.initialize(req.body);
+        llm.initialize({
+            llmSource,
+            apiKey,
+            apiUrl,
+            model,
+            ollamaUrl,
+            ollamaModel
+        });
         const result = await llm.testConnection();
         res.json(result);
     }));
 
     // -----------------------------------------------------------------------
     // GET /api/debug/cache
+    // Debug endpoint - only available in non-production environments
     // -----------------------------------------------------------------------
     router.get('/debug/cache', asyncRoute('Cache stats', async (req, res) => {
+        // Block debug endpoints in production
+        if (process.env.NODE_ENV === 'production') {
+            return res.status(404).json({ error: 'Not found' });
+        }
+
         const llm = new LLMService();
         res.json(llm.getCacheStats());
     }));
