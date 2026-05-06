@@ -10,18 +10,8 @@ module.exports = function({
 }) {
     const router = express.Router();
 
-    // -----------------------------------------------------------------------
-    // GET /api/health
-    // -----------------------------------------------------------------------
-    router.get('/health', (req, res) => {
-        res.json({
-            status: 'ok',
-            gamesCount: games.size,
-            projectsCount: projects.size,
-            sessionsCount: generationSessions.size,
-            memory: memoryService?.getStatus?.() ?? { enabled: false }
-        });
-    });
+    // NOTE: /api/health is now handled by the enhanced healthCheck middleware
+    // registered directly in server.js (includes DB check, system resources, etc.)
 
     // -----------------------------------------------------------------------
     // GET /api/memory/stats

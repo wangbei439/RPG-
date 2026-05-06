@@ -19,10 +19,13 @@ const ManasDBService = require('./utils/ManasDBService');
 const { initWebSocket } = require('./websocket');
 const db = require('./database');
 const { createHelpers } = require('./routes/helpers');
+const logger = require('./middleware/logger');
 
 // Middleware
 const { authMiddleware } = require('./middleware/auth');
-const { defaultLimiter, authLimiter } = require('./middleware/rateLimiter');
+const { defaultLimiter, authLimiter, llmLimiter } = require('./middleware/rateLimiter');
+const requestId = require('./middleware/requestId');
+const healthCheck = require('./middleware/healthCheck');
 
 // Route modules
 const createGameRoutes = require('./routes/gameRoutes');
@@ -31,6 +34,7 @@ const createProjectRoutes = require('./routes/projectRoutes');
 const createComfyuiRoutes = require('./routes/comfyuiRoutes');
 const createSystemRoutes = require('./routes/systemRoutes');
 const createAuthRoutes = require('./routes/authRoutes');
+const createSettingsRoutes = require('./routes/settingsRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -47,7 +51,8 @@ app.set('trust proxy', 1);
 const corsOptions = {
     origin: process.env.CORS_ORIGIN || '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
+    exposedHeaders: ['X-Request-Id'],
     credentials: true,
     maxAge: 86400 // Preflight cache: 24 hours
 };
@@ -55,16 +60,26 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Request ID middleware — assigns a unique trace ID to every request
+app.use(requestId());
+
 // Rate limiting (applied before auth so brute-force attempts are limited)
 app.use('/api/auth', authLimiter.middleware());
+
+// LLM-specific strict rate limiting on generation and game action endpoints
+app.use('/api/generate', llmLimiter.middleware());
+app.use('/api/games/:gameId/action', llmLimiter.middleware());
+app.use('/api/games/:gameId/generate-image', llmLimiter.middleware());
+
 app.use(defaultLimiter.middleware());
 
-// Authentication middleware (skip for auth routes themselves)
+// Authentication middleware (skip for auth routes and health check)
 app.use('/api/auth', createAuthRoutes());
 app.use(authMiddleware);
 
 // Initialize SQLite database before anything else
 db.initDatabase();
+db.runMigrations();
 
 const games = new Map();
 const projectStore = new ProjectStore(PROJECT_STORE_DIR);
@@ -86,7 +101,7 @@ const generationSessions = new Map();
         });
     }
     if (persistedGames.length > 0) {
-        console.log(`[Startup] Recovered ${persistedGames.length} game(s) from database`);
+        logger.info(`Recovered ${persistedGames.length} game(s) from database`);
     }
 })();
 
@@ -122,7 +137,7 @@ const generationSessions = new Map();
         });
     }
     if (persistedSessions.length > 0) {
-        console.log(`[Startup] Recovered ${persistedSessions.length} generation session(s) from database`);
+        logger.info(`Recovered ${persistedSessions.length} generation session(s) from database`);
     }
 })();
 
@@ -149,19 +164,23 @@ const dependencies = {
     ...helpers
 };
 
+// Enhanced health check endpoint (replaces simple one in systemRoutes)
+app.get('/api/health', healthCheck({ db, games, generationSessions, projects }));
+
 // Mount route modules
 app.use('/', createGameRoutes(dependencies));
 app.use('/', createGenerateRoutes(dependencies));
 app.use('/', createProjectRoutes(dependencies));
 app.use('/', createComfyuiRoutes(dependencies));
 app.use('/', createSystemRoutes(dependencies));
+app.use('/', createSettingsRoutes({ db }));
 
 // Global error handler (must be after all routes)
 const errorHandler = require('./middleware/errorHandler');
 app.use(errorHandler);
 
 // Cleanup interval
-setInterval(cleanupExpiredRecords, CLEANUP_INTERVAL);
+const cleanupInterval = setInterval(cleanupExpiredRecords, CLEANUP_INTERVAL);
 
 function cleanupExpiredRecords() {
     const now = Date.now();
@@ -194,7 +213,7 @@ function cleanupExpiredRecords() {
     const gameCutoff = now - GAME_TIMEOUT;
     const cleaned = db.cleanupExpired(Math.max(sessionCutoff, gameCutoff));
     if (cleaned.games > 0 || cleaned.sessions > 0) {
-        console.log(`[Cleanup] Database: removed ${cleaned.games} game(s), ${cleaned.sessions} session(s)`);
+        logger.info('Database cleanup', { gamesRemoved: cleaned.games, sessionsRemoved: cleaned.sessions });
     }
 }
 
@@ -206,14 +225,14 @@ function loadManasConfig() {
 
         return JSON.parse(fs.readFileSync(MANASDB_CONFIG_PATH, 'utf8'));
     } catch (error) {
-        console.warn('加载 ManasDB 配置失败，将以禁用模式继续运行:', error.message);
+        logger.warn('ManasDB config load failed, running in disabled mode', { error: error.message });
         return { enabled: false };
     }
 }
 
 const server = http.createServer(app);
 
-// 初始化 WebSocket 服务器
+// Initialize WebSocket server
 initWebSocket(server);
 
 // ---------------------------------------------------------------------------
@@ -233,7 +252,7 @@ function enforceMapLimit(map, maxItems, label) {
         map.delete(key);
         evicted++;
     }
-    console.warn(`[Memory] ${label} exceeded limit (${map.size + evicted} > ${maxItems}), evicted ${evicted} entries`);
+    logger.warn('Map limit exceeded, evicted entries', { map: label, evicted, limit: maxItems });
 }
 
 // Periodic memory enforcement
@@ -247,11 +266,12 @@ setInterval(() => {
 // Start server
 // ---------------------------------------------------------------------------
 server.listen(PORT, () => {
-    console.log(`RPG Generator Backend running on http://localhost:${PORT}`);
-    console.log(`WebSocket available at ws://localhost:${PORT}/ws`);
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    logger.info(`RPG Generator Backend running on http://localhost:${PORT}`);
+    logger.info(`WebSocket available at ws://localhost:${PORT}/ws`);
+    logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    logger.info(`Database schema version: v${db.getSchemaVersion()}`);
     if (process.env.AUTH_DISABLED === 'true' && process.env.NODE_ENV !== 'production') {
-        console.warn('[SECURITY] Auth is DISABLED (AUTH_DISABLED=true). Do not use in production!');
+        logger.warn('Auth is DISABLED (AUTH_DISABLED=true). Do not use in production!');
     }
 });
 
@@ -259,31 +279,31 @@ server.listen(PORT, () => {
 // Graceful shutdown
 // ---------------------------------------------------------------------------
 function gracefulShutdown(signal) {
-    console.log(`\n[Shutdown] Received ${signal}. Shutting down gracefully...`);
+    logger.info(`Received ${signal}. Shutting down gracefully...`);
 
     // Stop accepting new connections
     server.close(() => {
-        console.log('[Shutdown] HTTP server closed.');
+        logger.info('HTTP server closed.');
 
         // Close database connection
         try {
             db.closeDatabase();
-            console.log('[Shutdown] Database connection closed.');
+            logger.info('Database connection closed.');
         } catch (err) {
-            console.error('[Shutdown] Error closing database:', err.message);
+            logger.error('Error closing database', { error: err.message });
         }
 
         // Clear intervals
         clearInterval(cleanupInterval);
-        console.log('[Shutdown] Cleanup intervals cleared.');
+        logger.info('Cleanup intervals cleared.');
 
-        console.log('[Shutdown] Complete. Exiting.');
+        logger.info('Shutdown complete. Exiting.');
         process.exit(0);
     });
 
     // Force exit after 10 seconds if graceful shutdown hangs
     setTimeout(() => {
-        console.error('[Shutdown] Forced exit after 10s timeout.');
+        logger.error('Forced exit after 10s timeout.');
         process.exit(1);
     }, 10000);
 }
@@ -293,11 +313,11 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Handle uncaught exceptions and unhandled rejections
 process.on('uncaughtException', (err) => {
-    console.error('[FATAL] Uncaught Exception:', err);
+    logger.error('Uncaught Exception', { error: err.message, stack: err.stack });
     gracefulShutdown('uncaughtException');
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
+    logger.error('Unhandled Rejection', { reason: String(reason) });
     gracefulShutdown('unhandledRejection');
 });

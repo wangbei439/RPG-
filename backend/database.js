@@ -52,6 +52,23 @@ function initDatabase() {
             CREATE INDEX IF NOT EXISTS idx_games_updated ON games(updated_at);
             CREATE INDEX IF NOT EXISTS idx_sessions_updated ON generation_sessions(updated_at);
             CREATE INDEX IF NOT EXISTS idx_projects_updated ON projects(updated_at);
+
+            -- Encrypted settings storage (API keys, LLM config, etc.)
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                encrypted INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
+            -- Schema version tracking for migrations
+            CREATE TABLE IF NOT EXISTS schema_version (
+                version INTEGER PRIMARY KEY,
+                applied_at INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key);
         `);
 
         console.log(`[Database] SQLite database initialized at ${DB_PATH}`);
@@ -103,6 +120,21 @@ function initDatabase() {
                     CREATE INDEX IF NOT EXISTS idx_games_updated ON games(updated_at);
                     CREATE INDEX IF NOT EXISTS idx_sessions_updated ON generation_sessions(updated_at);
                     CREATE INDEX IF NOT EXISTS idx_projects_updated ON projects(updated_at);
+
+                    CREATE TABLE IF NOT EXISTS settings (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL,
+                        encrypted INTEGER NOT NULL DEFAULT 0,
+                        created_at INTEGER NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS schema_version (
+                        version INTEGER PRIMARY KEY,
+                        applied_at INTEGER NOT NULL
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key);
                 `);
 
                 console.log('[Database] Database recovered successfully');
@@ -417,21 +449,285 @@ function closeDatabase() {
     }
 }
 
+// ===== Settings (encrypted storage) =====
+
+const { encrypt, decrypt, maskSecret } = require('./utils/encryption');
+
+/**
+ * Keys that contain sensitive data and should be encrypted at rest.
+ */
+const SENSITIVE_KEY_PATTERNS = [
+    /api[_-]?key/i,
+    /secret/i,
+    /password/i,
+    /token/i,
+    /credential/i,
+    /auth/i
+];
+
+function isSensitiveKey(key) {
+    return SENSITIVE_KEY_PATTERNS.some((pattern) => pattern.test(key));
+}
+
+/**
+ * Save a setting. Sensitive keys are automatically encrypted.
+ *
+ * @param {string} key - Setting key (e.g., 'openai_api_key', 'llm_config')
+ * @param {string|object} value - Setting value (objects are JSON-serialized)
+ * @returns {boolean} Success
+ */
+function saveSetting(key, value) {
+    const database = getDb();
+    if (!database) return false;
+
+    try {
+        const now = Date.now();
+        const valueStr = typeof value === 'string' ? value : JSON.stringify(value);
+        const sensitive = isSensitiveKey(key);
+        const storedValue = sensitive ? encrypt(valueStr) : valueStr;
+        const encrypted = sensitive ? 1 : 0;
+
+        database.prepare(`
+            INSERT INTO settings (key, value, encrypted, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                encrypted = excluded.encrypted,
+                updated_at = excluded.updated_at
+        `).run(key, storedValue, encrypted, now, now);
+
+        return true;
+    } catch (error) {
+        console.error(`[Database] Failed to save setting ${key}:`, error.message);
+        return false;
+    }
+}
+
+/**
+ * Load a setting. Encrypted values are automatically decrypted.
+ *
+ * @param {string} key - Setting key
+ * @returns {string|null} Decrypted setting value, or null if not found
+ */
+function loadSetting(key) {
+    const database = getDb();
+    if (!database) return null;
+
+    try {
+        const row = database.prepare('SELECT * FROM settings WHERE key = ?').get(key);
+        if (!row) return null;
+
+        if (row.encrypted) {
+            return decrypt(row.value);
+        }
+
+        // Try to parse as JSON, fall back to raw string
+        try {
+            return JSON.parse(row.value);
+        } catch {
+            return row.value;
+        }
+    } catch (error) {
+        console.error(`[Database] Failed to load setting ${key}:`, error.message);
+        return null;
+    }
+}
+
+/**
+ * Load all settings. Encrypted values are masked for safe display.
+ *
+ * @param {object} [options] - Options
+ * @param {boolean} [options.revealSecrets=false] - If true, decrypt and return sensitive values
+ * @returns {object} Key-value map of settings
+ */
+function loadAllSettings(options = {}) {
+    const database = getDb();
+    if (!database) return {};
+
+    try {
+        const rows = database.prepare('SELECT * FROM settings').all();
+        const result = {};
+        for (const row of rows) {
+            if (row.encrypted) {
+                if (options.revealSecrets) {
+                    const decrypted = decrypt(row.value);
+                    try {
+                        result[row.key] = JSON.parse(decrypted);
+                    } catch {
+                        result[row.key] = decrypted;
+                    }
+                } else {
+                    // Return a masked placeholder
+                    const decrypted = decrypt(row.value);
+                    result[row.key] = decrypted ? maskSecret(String(decrypted)) : '****';
+                }
+            } else {
+                try {
+                    result[row.key] = JSON.parse(row.value);
+                } catch {
+                    result[row.key] = row.value;
+                }
+            }
+        }
+        return result;
+    } catch (error) {
+        console.error('[Database] Failed to load all settings:', error.message);
+        return {};
+    }
+}
+
+/**
+ * Delete a setting.
+ *
+ * @param {string} key - Setting key
+ * @returns {boolean} Success
+ */
+function deleteSetting(key) {
+    const database = getDb();
+    if (!database) return false;
+
+    try {
+        database.prepare('DELETE FROM settings WHERE key = ?').run(key);
+        return true;
+    } catch (error) {
+        console.error(`[Database] Failed to delete setting ${key}:`, error.message);
+        return false;
+    }
+}
+
+/**
+ * Save multiple settings at once in a single transaction.
+ *
+ * @param {object} settingsMap - Key-value pairs to save
+ * @returns {boolean} Success
+ */
+function saveSettingsBatch(settingsMap) {
+    const database = getDb();
+    if (!database) return false;
+
+    try {
+        const transaction = database.transaction(() => {
+            for (const [key, value] of Object.entries(settingsMap)) {
+                saveSetting(key, value);
+            }
+        });
+        transaction();
+        return true;
+    } catch (error) {
+        console.error('[Database] Failed to save settings batch:', error.message);
+        return false;
+    }
+}
+
+// ===== Schema Migrations =====
+
+/**
+ * Get the current schema version.
+ * @returns {number} Current version (0 if no migrations applied)
+ */
+function getSchemaVersion() {
+    const database = getDb();
+    if (!database) return 0;
+
+    try {
+        const row = database.prepare('SELECT MAX(version) as version FROM schema_version').get();
+        return row?.version || 0;
+    } catch {
+        return 0;
+    }
+}
+
+/**
+ * Migration definitions. Each migration has a version number and an `up` function.
+ * Migrations are applied in order when the database schema version is lower.
+ */
+const MIGRATIONS = [
+    {
+        version: 1,
+        description: 'Add settings and schema_version tables',
+        up: () => {
+            // These tables are created in initDatabase, so this is a no-op for new DBs
+            // But for existing DBs that were created before P2, we need to add them
+            const database = getDb();
+            database.exec(`
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    encrypted INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS schema_version (
+                    version INTEGER PRIMARY KEY,
+                    applied_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key);
+            `);
+        }
+    }
+];
+
+/**
+ * Run pending database migrations.
+ * Applies all migrations with a version higher than the current schema version.
+ */
+function runMigrations() {
+    const database = getDb();
+    if (!database) return;
+
+    const currentVersion = getSchemaVersion();
+    const pending = MIGRATIONS.filter((m) => m.version > currentVersion).sort((a, b) => a.version - b.version);
+
+    if (pending.length === 0) {
+        return;
+    }
+
+    console.log(`[Database] Running ${pending.length} pending migration(s) (current: v${currentVersion})...`);
+
+    const transaction = database.transaction(() => {
+        for (const migration of pending) {
+            console.log(`[Database] Applying migration v${migration.version}: ${migration.description}`);
+            migration.up();
+            database.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(migration.version, Date.now());
+        }
+    });
+
+    try {
+        transaction();
+        console.log(`[Database] Migrations complete. Schema version: v${pending[pending.length - 1].version}`);
+    } catch (error) {
+        console.error(`[Database] Migration failed: ${error.message}`);
+        throw error;
+    }
+}
+
 module.exports = {
     initDatabase,
     getDb,
     closeDatabase,
+    runMigrations,
+    getSchemaVersion,
+    // Games
     saveGame,
     loadGame,
     deleteGame,
     loadAllGames,
+    // Sessions
     saveSession,
     loadSession,
     deleteSession,
     loadAllSessions,
+    // Projects
     saveProject,
     loadProject,
     deleteProject,
     loadAllProjects,
+    // Settings
+    saveSetting,
+    loadSetting,
+    loadAllSettings,
+    deleteSetting,
+    saveSettingsBatch,
+    // Cleanup
     cleanupExpired
 };
