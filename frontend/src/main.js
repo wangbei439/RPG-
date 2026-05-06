@@ -3115,7 +3115,7 @@ function initGameScreen() {
     });
 
     syncSceneImageControls();
-    syncLiveImageConfigPanel();
+    
 }
 
 async function generateSceneImages() {

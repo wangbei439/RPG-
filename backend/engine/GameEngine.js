@@ -513,7 +513,7 @@ class GameEngine {
 
     buildGamePrompt(context, action) {
         const template = this.getGameTypeTemplate();
-        const recentHistory = context.history.length
+        const recentHistory = (context.history || []).length
             ? context.history.map((item) => [
                 `第${item.turn}回合`,
                 `玩家行动：${item.action}`,

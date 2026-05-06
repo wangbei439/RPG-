@@ -24,7 +24,7 @@ const SESSION_TIMEOUT = 30 * 60 * 1000;
 const GAME_TIMEOUT = 12 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL = 60 * 1000;
 const COMFY_WORKFLOWS_DIR = process.env.COMFY_WORKFLOWS_DIR
-    || path.join('G:\\comfy\\wenjian\\user\\default', 'workflows');
+    || path.join(__dirname, 'comfyui', 'workflows');
 const MANASDB_CONFIG_PATH = path.join(__dirname, 'manasdb-config.json');
 const PROJECT_STORE_DIR = path.join(__dirname, 'data', 'projects');
 
@@ -43,7 +43,8 @@ const finalizer = new GameFinalizer();
 const projectManager = new ProjectManager();
 const visualDirector = new VisualDirector();
 const assetManager = new AssetManager(visualDirector);
-const memoryService = new ManasDBService(loadManasConfig());
+const manasConfig = loadManasConfig();
+const memoryService = manasConfig.enabled ? new ManasDBService(manasConfig) : null;
 const sceneImageCache = new Map();
 
 function createHttpError(status, message) {
@@ -183,8 +184,8 @@ function createProgressSender(res) {
 function handleApiError(res, error, scope) {
     if (scope) {
         console.error(`${scope}:`, error);
+        console.error(error.stack);  // 加这一行
     }
-
     const status = error.status || 500;
     res.status(status).json({ error: error.message || '服务器内部错误' });
 }
@@ -194,8 +195,8 @@ function asyncRoute(scope, handler) {
         try {
             await handler(req, res);
         } catch (error) {
-            handleApiError(res, error, scope);
-        }
+    return handleApiError(res, error, scope);
+     }
     };
 }
 

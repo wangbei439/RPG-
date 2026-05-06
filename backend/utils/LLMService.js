@@ -1,6 +1,5 @@
 ﻿const OpenAI = require('openai');
 const CacheService = require('./CacheService');
-const CostTracker = require('./CostTracker');
 
 class LLMService {
     constructor() {
