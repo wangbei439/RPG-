@@ -48,12 +48,18 @@ class LLMService {
 
         try {
             if (this.client.type === 'anthropic') {
-                return await this.generateAnthropicText(prompt, model, maxTokens);
+                return await this.generateAnthropicText(prompt, model, maxTokens, options);
             }
+
+            const messages = [];
+            if (options.systemPrompt) {
+                messages.push({ role: 'system', content: options.systemPrompt });
+            }
+            messages.push({ role: 'user', content: prompt });
 
             const response = await this.client.chat.completions.create({
                 model: this.settings?.model || model,
-                messages: [{ role: 'user', content: prompt }],
+                messages,
                 max_tokens: maxTokens,
                 temperature: options.temperature || 0.8
             });
@@ -109,10 +115,29 @@ class LLMService {
 
         try {
             if (this.client.type === 'anthropic') {
-                // Anthropic 暂不支持流式，回退到普通模式
-                const result = await this.generateJSON(prompt);
-                onChunk(JSON.stringify(result));
-                return result;
+                // Anthropic 使用原生流式 API
+                let fullText = '';
+                let lastValidJSON = null;
+
+                await this.generateAnthropicTextStreaming(jsonPrompt, (textDelta) => {
+                    fullText += textDelta;
+
+                    // 尝试解析部分 JSON
+                    try {
+                        const parsed = this.extractAndParseJSON(fullText);
+                        lastValidJSON = parsed;
+                        onChunk(parsed);
+                    } catch (e) {
+                        // 还没有完整的 JSON，继续
+                    }
+                }, model, 8000, { temperature: 0.7 });
+
+                // 返回最终结果
+                if (lastValidJSON) {
+                    return lastValidJSON;
+                }
+
+                return this.extractAndParseJSON(fullText);
             }
 
             const stream = await this.client.chat.completions.create({
@@ -165,15 +190,19 @@ class LLMService {
 
         try {
             if (this.client.type === 'anthropic') {
-                // Anthropic 暂不支持流式，回退到普通模式
-                const result = await this.generateText(prompt, options);
-                onChunk(result);
-                return result;
+                // Anthropic 使用原生流式 API
+                return await this.generateAnthropicTextStreaming(prompt, onChunk, model, maxTokens, options);
             }
+
+            const messages = [];
+            if (options.systemPrompt) {
+                messages.push({ role: 'system', content: options.systemPrompt });
+            }
+            messages.push({ role: 'user', content: prompt });
 
             const stream = await this.client.chat.completions.create({
                 model: this.settings?.model || model,
-                messages: [{ role: 'user', content: prompt }],
+                messages,
                 max_tokens: maxTokens,
                 temperature: options.temperature || 0.8,
                 stream: true
@@ -300,7 +329,18 @@ class LLMService {
         return null;
     }
 
-    async generateAnthropicText(prompt, model, maxTokens) {
+    async generateAnthropicText(prompt, model, maxTokens, options = {}) {
+        const requestBody = {
+            model: model || 'claude-3-5-sonnet-20241022',
+            max_tokens: maxTokens,
+            messages: [{ role: 'user', content: prompt }]
+        };
+
+        // 支持 system prompt
+        if (options.systemPrompt) {
+            requestBody.system = options.systemPrompt;
+        }
+
         const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: {
@@ -308,19 +348,92 @@ class LLMService {
                 'x-api-key': this.client.apiKey,
                 'anthropic-version': '2023-06-01'
             },
-            body: JSON.stringify({
-                model: model || 'claude-3-5-sonnet-20241022',
-                max_tokens: maxTokens,
-                messages: [{ role: 'user', content: prompt }]
-            })
+            body: JSON.stringify(requestBody)
         });
 
         if (!response.ok) {
-            throw new Error(`Anthropic API 错误：${response.statusText}`);
+            const errorBody = await response.text().catch(() => '');
+            throw new Error(`Anthropic API 错误：${response.statusText} ${errorBody}`);
         }
 
         const data = await response.json();
         return data.content[0].text;
+    }
+
+    /**
+     * Anthropic 流式文本生成
+     * 使用 Anthropic SSE streaming API 实时返回文本片段
+     */
+    async generateAnthropicTextStreaming(prompt, onChunk, model, maxTokens, options = {}) {
+        const requestBody = {
+            model: model || 'claude-3-5-sonnet-20241022',
+            max_tokens: maxTokens,
+            messages: [{ role: 'user', content: prompt }],
+            stream: true
+        };
+
+        // 支持 system prompt
+        if (options.systemPrompt) {
+            requestBody.system = options.systemPrompt;
+        }
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': this.client.apiKey,
+                'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.text().catch(() => '');
+            throw new Error(`Anthropic API 错误：${response.statusText} ${errorBody}`);
+        }
+
+        let fullText = '';
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+
+                    if (!trimmed || !trimmed.startsWith('data: ')) continue;
+
+                    const jsonStr = trimmed.slice(6).trim();
+                    if (!jsonStr) continue;
+
+                    try {
+                        const event = JSON.parse(jsonStr);
+
+                        if (event.type === 'content_block_delta'
+                            && event.delta
+                            && event.delta.type === 'text_delta'
+                            && event.delta.text) {
+                            fullText += event.delta.text;
+                            onChunk(event.delta.text);
+                        }
+                    } catch (parseError) {
+                        // 忽略非 JSON 行或不完整的数据
+                    }
+                }
+            }
+        } finally {
+            reader.releaseLock();
+        }
+
+        return fullText;
     }
 
     async testConnection() {

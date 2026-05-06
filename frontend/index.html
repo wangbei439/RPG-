@@ -381,12 +381,20 @@
             <header class="game-header">
                 <button id="exit-game" class="back-btn">← 退出</button>
                 <h2 id="game-title">游戏标题</h2>
+                <span id="autosave-indicator" class="autosave-indicator">
+                    <span class="autosave-icon">💾</span>
+                    <span id="autosave-text">已自动保存</span>
+                </span>
                 <button id="game-menu-btn" class="icon-btn">☰</button>
             </header>
 
+            <!-- Mobile compact game log (hidden on desktop) -->
+            <div id="mobile-game-log" class="mobile-game-log"></div>
+
             <div class="game-layout">
                 <!-- 左侧：场景图像 -->
-                <div class="scene-panel">
+                <div class="scene-panel" id="scene-panel">
+                    <button id="scene-toggle-btn" class="scene-toggle-btn" type="button">▼ 收起场景图</button>
                     <div id="scene-image" class="scene-image">
                         <div class="placeholder">场景图像将在这里显示</div>
                     </div>
@@ -513,10 +521,58 @@
                     <button class="menu-item" id="load-game">📂 加载游戏</button>
                     <button class="menu-item" id="restart-game">🔄 重新开始</button>
                     <button class="menu-item" id="export-game">📤 导出游戏</button>
+                    <div class="autosave-toggle" id="autosave-toggle" role="button" tabindex="0" aria-label="自动保存开关">
+                        <span>🔄 自动保存</span>
+                        <div id="autosave-toggle-switch" class="autosave-toggle-switch active"></div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
+
+    <!-- Toast notification container -->
+    <div id="toast-container"></div>
+
+    <!-- Mobile floating status FAB (only visible on mobile game screen) -->
+    <button id="mobile-status-fab" class="mobile-status-fab" type="button" title="查看状态">📊</button>
+
+    <!-- Mobile status overlay -->
+    <div id="mobile-status-overlay" class="mobile-status-overlay">
+        <div class="mobile-status-panel">
+            <div class="mobile-status-panel-header">
+                <h3>📊 角色状态</h3>
+                <button id="mobile-status-close" class="mobile-status-close" type="button">✕</button>
+            </div>
+            <div id="mobile-player-stats" class="player-stats"></div>
+            <div id="mobile-inventory" class="inventory">
+                <h3>📦 物品栏</h3>
+                <ul id="mobile-inventory-list"></ul>
+            </div>
+            <div id="mobile-quest-log" class="quest-log">
+                <h3>📜 任务日志</h3>
+                <ul id="mobile-quest-list"></ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile bottom navigation bar -->
+    <nav id="mobile-bottom-nav" class="mobile-bottom-nav">
+        <button class="mobile-bottom-nav-item" id="mobile-nav-home" type="button">
+            <span class="nav-icon">🏠</span>
+            <span>首页</span>
+        </button>
+        <button class="mobile-bottom-nav-item" id="mobile-nav-settings" type="button">
+            <span class="nav-icon">⚙️</span>
+            <span>设置</span>
+        </button>
+        <button class="mobile-bottom-nav-item" id="mobile-nav-save" type="button">
+            <span class="nav-icon">💾</span>
+            <span>保存</span>
+        </button>
+    </nav>
+
+    <!-- Swipe back gesture zone -->
+    <div id="swipe-back-zone" class="swipe-back-zone"></div>
 
     <script type="module" src="/src/main.js"></script>
 </body>

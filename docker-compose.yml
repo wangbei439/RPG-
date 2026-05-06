@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  rpg-generator:
+    build: .
+    container_name: rpg-generator
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - AUTH_DISABLED=${AUTH_DISABLED:-false}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - LLM_SOURCE=${LLM_SOURCE:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_URL=${OPENAI_URL:-https://api.openai.com/v1}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+      - IMAGE_SOURCE=${IMAGE_SOURCE:-none}
+      - COMFYUI_URL=${COMFYUI_URL:-http://host.docker.internal:8000}
+    volumes:
+      - rpg-data:/app/backend/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  rpg-data:
+    driver: local
