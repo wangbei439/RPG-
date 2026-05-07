@@ -157,8 +157,8 @@ module.exports = function({
         const game = getGameOrThrow(req.params.gameId);
         const { action, streaming, settings } = req.body;
 
-        if (!action) {
-            throw createHttpError(400, '缺少 action');
+        if (!action || typeof action !== 'string') {
+            throw createHttpError(400, '缺少有效的 action（必须为非空字符串）');
         }
 
         if (!game.engine) {

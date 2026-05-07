@@ -140,7 +140,7 @@ async function performAutoSave() {
 export function initGameScreen() {
     initializeLiveImageConfigPanel();
 
-    document.getElementById('send-btn').addEventListener('click', sendPlayerAction);
+    document.getElementById('send-btn').addEventListener('click', () => sendPlayerAction());
     document.getElementById('player-input').addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
             sendPlayerAction();
@@ -480,7 +480,9 @@ async function sendPlayerAction(actionOverride = '') {
 
     const input = document.getElementById('player-input');
     const sendButton = document.getElementById('send-btn');
-    const action = actionOverride || input?.value.trim() || '';
+    // Defensive: ignore Event objects that may be passed by addEventListener
+    const effectiveOverride = (typeof actionOverride === 'string') ? actionOverride : '';
+    const action = effectiveOverride || input?.value.trim() || '';
     if (!action) {
         return;
     }
@@ -535,7 +537,20 @@ async function sendPlayerActionStreaming(action, imageConfig) {
     });
 
     if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        // Try to extract a meaningful error message from the response body
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+            const errorBody = await response.json();
+            errorMessage = errorBody.error || errorBody.message || errorMessage;
+        } catch {
+            // Response might not be JSON (e.g., SSE stream that errored after headers)
+            try {
+                const text = await response.text();
+                const match = text.match(/"error"\s*:\s*"([^"]+)"/);
+                if (match) errorMessage = match[1];
+            } catch { /* ignore */ }
+        }
+        throw new Error(errorMessage);
     }
 
     const reader = response.body.getReader();
