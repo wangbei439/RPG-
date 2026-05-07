@@ -581,6 +581,9 @@ async function sendPlayerActionStreaming(action, imageConfig) {
                     }
                     currentNarration = chunk.text;
                     narratorLogElement.textContent = currentNarration;
+                } else if (chunk.type === 'error') {
+                    // Server-sent error during streaming
+                    appendLog('system', `AI 生成失败：${chunk.message || '未知错误'}`);
                 } else if (chunk.type === 'complete') {
                     // 完成
                     if (Array.isArray(chunk.gameState?.lastDialogues)) {

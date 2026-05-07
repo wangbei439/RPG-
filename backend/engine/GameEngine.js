@@ -51,8 +51,8 @@ class GameEngine {
     }
 
     async restore(state) {
-        // LLM already initialized in constructor, but re-verify
-        if (this.config?.settings?.llmSource && !this.llm.client) {
+        // Always initialize LLM if settings are available (even partially)
+        if (this.config?.settings) {
             this.llm.initialize(this.config.settings);
         }
         this.state = await this.normalizeRestoredState(state);
@@ -65,8 +65,8 @@ class GameEngine {
     }
 
     async start() {
-        // LLM already initialized in constructor, but re-verify
-        if (this.config?.settings?.llmSource && !this.llm.client) {
+        // Always initialize LLM if settings are available (even partially)
+        if (this.config?.settings) {
             this.llm.initialize(this.config.settings);
         }
         if (!this.llm.client) {
@@ -224,8 +224,8 @@ class GameEngine {
 
         // 一致性验证
         const validation = this.validator.validate(result, context);
-        if (!validation.isValid && validation.errors.length > 0) {
-            console.warn('一致性验证失败:', validation.errors);
+        if (!validation.valid && Array.isArray(validation.violations) && validation.violations.length > 0) {
+            console.warn('一致性验证失败:', validation.violations);
             // 可以选择重新生成或修正
         }
 
@@ -263,7 +263,7 @@ class GameEngine {
             gameOver: this.state.gameOver,
             gameOverMessage: this.state.gameOverMessage,
             recalledMemories: context.recalledMemories || [],
-            validation: validation.isValid ? null : validation
+            validation: validation.valid ? null : validation
         };
     }
 
@@ -349,8 +349,8 @@ class GameEngine {
 
         // 一致性验证
         const validation = this.validator.validate(fullResult, context);
-        if (!validation.isValid && validation.errors.length > 0) {
-            console.warn('一致性验证失败:', validation.errors);
+        if (!validation.valid && Array.isArray(validation.violations) && validation.violations.length > 0) {
+            console.warn('一致性验证失败:', validation.violations);
         }
 
         this.updateState(fullResult);
@@ -387,7 +387,7 @@ class GameEngine {
             visualSceneChanged,
             gameOver: this.state.gameOver,
             gameOverMessage: this.state.gameOverMessage,
-            validation: validation.isValid ? null : validation
+            validation: validation.valid ? null : validation
         });
     }
 

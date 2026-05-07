@@ -7,6 +7,48 @@ const { getExampleGamesList, getExampleGame } = require('../templates/ExampleGam
 const { validateBody, schemas } = require('../middleware/validate');
 const logger = require('../middleware/logger');
 
+/**
+ * Merge frontend LLM settings with backend DB settings.
+ * Frontend may send empty or masked (containing ***) values for sensitive fields.
+ * In those cases, fall back to the value stored in the SQLite settings table.
+ */
+function resolveLlmSettings(frontendSettings = {}, dbModule) {
+    const dbSettings = dbModule.loadAllSettings({ revealSecrets: true });
+
+    const KEY_MAP = {
+        llmSource: 'llm_source',
+        apiUrl:   'openai_url',
+        apiKey:   'openai_api_key',
+        model:    'openai_model'
+    };
+
+    const merged = { ...frontendSettings };
+
+    for (const [feKey, dbKey] of Object.entries(KEY_MAP)) {
+        const feVal = merged[feKey];
+        const dbVal = dbSettings[dbKey];
+
+        // Use DB value when frontend value is missing, empty, or masked
+        if (!feVal || (typeof feVal === 'string' && feVal.includes('***'))) {
+            if (dbVal !== undefined && dbVal !== null && dbVal !== '') {
+                merged[feKey] = dbVal;
+            }
+        }
+    }
+
+    // If llmSource still not set, derive from DB or default to 'openai'
+    if (!merged.llmSource) {
+        merged.llmSource = dbSettings.llm_source || 'openai';
+    }
+
+    // If apiUrl still not set, use a sensible default
+    if (!merged.apiUrl) {
+        merged.apiUrl = dbSettings.openai_url || 'https://api.openai.com/v1';
+    }
+
+    return merged;
+}
+
 module.exports = function({
     games, generationSessions, projects, projectStore, generator, imageService,
     stepGenerator, finalizer, projectManager, visualDirector, assetManager,
@@ -90,14 +132,10 @@ module.exports = function({
     router.post('/games/:gameId/start', asyncRoute('Start game error', async (req, res) => {
         const game = getGameOrThrow(req.params.gameId);
 
-        // Merge frontend settings into config, with DB fallback
-        const llmSettings = resolveLlmSettings(req.body?.settings);
-        const configWithSettings = {
-            ...game.config,
-            settings: llmSettings
-        };
+        // Ensure LLM settings are complete (merge with DB if needed)
+        game.config.settings = resolveLlmSettings(game.config?.settings, db);
 
-        const engine = new GameEngine(game.data, configWithSettings, {
+        const engine = new GameEngine(game.data, game.config, {
             gameId: game.id,
             memoryService
         });
@@ -122,6 +160,9 @@ module.exports = function({
         if (!gameData || !gameState || !config) {
             throw createHttpError(400, '缺少恢复游戏所需的 gameData、gameState 或 config');
         }
+
+        // Ensure LLM settings are complete (merge with DB if needed)
+        config.settings = resolveLlmSettings(config?.settings, db);
 
         const restoredGameId = gameId || gameState.id || uuidv4();
 
@@ -177,19 +218,28 @@ module.exports = function({
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
 
+            // Flush headers immediately so the client gets a 200
+            res.flushHeaders();
+
             let finalResult = null;
 
-            await game.engine.processActionStreaming(action, (chunk) => {
-                res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-                if (chunk.type === 'complete') {
-                    finalResult = chunk;
-                }
-            });
+            try {
+                await game.engine.processActionStreaming(action, (chunk) => {
+                    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+                    if (chunk.type === 'complete') {
+                        finalResult = chunk;
+                    }
+                });
 
-            if (finalResult) {
-                game.state = finalResult.gameState;
-                // Persist state change to SQLite
-                db.saveGame(game.id, game.config, game.data, game.state);
+                if (finalResult) {
+                    game.state = finalResult.gameState;
+                    // Persist state change to SQLite
+                    db.saveGame(game.id, game.config, game.data, game.state);
+                }
+            } catch (streamError) {
+                logger.error('Streaming action error', { error: streamError.message, gameId: req.params.gameId });
+                // Send error as SSE event since headers are already sent
+                res.write(`data: ${JSON.stringify({ type: 'error', message: streamError.message || 'AI 生成失败' })}\n\n`);
             }
 
             res.write('data: [DONE]\n\n');
@@ -397,9 +447,12 @@ module.exports = function({
             throw createHttpError(404, '示例游戏不存在');
         }
 
+        // Ensure LLM settings are complete (merge frontend settings with DB)
+        const settings = resolveLlmSettings(req.body.settings, db);
+
         const gameId = uuidv4();
         const config = {
-            settings: resolveLlmSettings(req.body.settings),
+            settings,
             gameType: example.type
         };
 

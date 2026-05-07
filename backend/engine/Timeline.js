@@ -138,7 +138,8 @@ class Timeline {
 
         // 按关键词匹配
         if (query) {
-            const keywords = query.toLowerCase().split(/\s+/);
+            const queryStr = typeof query === 'string' ? query : String(query);
+            const keywords = queryStr.toLowerCase().split(/\s+/);
             candidates = candidates.map(event => {
                 const text = `${event.summary} ${event.details}`.toLowerCase();
                 const score = keywords.reduce((sum, keyword) => {

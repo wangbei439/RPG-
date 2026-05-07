@@ -167,14 +167,14 @@ const dependencies = {
 // Enhanced health check endpoint (replaces simple one in systemRoutes)
 app.get('/api/health', healthCheck({ db, games, generationSessions, projects }));
 
-// Mount route modules — each router defines relative paths,
-// the mount prefix provides the /api/* namespace that the frontend expects.
+// Mount route modules — all under /api prefix so frontend paths match
+// Order matters: more specific routes must come before catch-all routes like /:projectId
 app.use('/api', createGameRoutes(dependencies));
-app.use('/api/generate', createGenerateRoutes(dependencies));
-app.use('/api/projects', createProjectRoutes(dependencies));
-app.use('/api/comfyui', createComfyuiRoutes(dependencies));
-app.use('/api', createSystemRoutes(dependencies));
+app.use('/api', createGenerateRoutes(dependencies));
 app.use('/api/settings', createSettingsRoutes({ db }));
+app.use('/api', createComfyuiRoutes(dependencies));
+app.use('/api', createSystemRoutes(dependencies));
+app.use('/api', createProjectRoutes(dependencies));  // /:projectId is greedy, must be last
 
 // Global error handler (must be after all routes)
 const errorHandler = require('./middleware/errorHandler');

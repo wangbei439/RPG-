@@ -86,12 +86,17 @@ function writeField(field, value, doc) {
 }
 
 export function collectLlmSettings(source = null, doc = document) {
-    const llmSource = source || doc.getElementById('llm-source').value;
+    const llmSource = source || doc.getElementById('llm-source')?.value || '';
     const config = FIELD_MAP[llmSource] || {};
     const settings = { llmSource };
 
     for (const [key, field] of Object.entries(config)) {
-        settings[key] = readValue(field.id, doc) || field.fallback || '';
+        const value = readValue(field.id, doc) || field.fallback || '';
+        // Skip masked API keys (containing ***) — backend will use DB value instead
+        if (key === 'apiKey' && typeof value === 'string' && value.includes('***')) {
+            continue;
+        }
+        settings[key] = value;
     }
 
     return settings;
