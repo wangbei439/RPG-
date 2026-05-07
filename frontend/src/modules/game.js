@@ -448,7 +448,9 @@ export async function startGame(gameId = state.currentGameId) {
     }
 
     try {
-        const data = await requestJson(`/games/${gameId}/start`, createJsonRequest('POST', {}));
+        const data = await requestJson(`/games/${gameId}/start`, createJsonRequest('POST', {
+            settings: collectLlmSettings()
+        }));
         state.currentGameId = gameId;
         state.gameState = data.gameState || null;
         state.sceneImages = [];

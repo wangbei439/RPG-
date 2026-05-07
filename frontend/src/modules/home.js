@@ -2,7 +2,7 @@
  * Home screen logic – hero section, examples, and quick-start.
  */
 
-import { requestJson } from '../services/api.js';
+import { requestJson, createJsonRequest } from '../services/api.js';
 import { collectLlmSettings } from '../services/settings.js';
 import { state, gameTypeNames } from './state.js';
 import { showScreen, updateProgress } from './navigation.js';
@@ -107,10 +107,9 @@ export async function startExampleGame(exampleId) {
         showScreen('loading-screen');
         updateProgress(10, '正在启动示例游戏...', '');
 
-        const response = await requestJson(`/examples/${exampleId}/start`, {
-            method: 'POST',
-            body: JSON.stringify({ settings })
-        });
+        const response = await requestJson(`/examples/${exampleId}/start`,
+            createJsonRequest('POST', { settings })
+        );
 
         updateProgress(100, '启动完成！', '');
 

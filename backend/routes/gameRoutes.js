@@ -19,6 +19,46 @@ module.exports = function({
     const { broadcastImageReady } = require('../websocket');
 
     // -----------------------------------------------------------------------
+    // Helper: resolve LLM settings with DB fallback
+    // If the frontend provides settings with llmSource, use them directly.
+    // Otherwise, try to load persisted settings from the SQLite database.
+    // -----------------------------------------------------------------------
+    function resolveLlmSettings(frontendSettings) {
+        if (frontendSettings && frontendSettings.llmSource) {
+            return frontendSettings;
+        }
+
+        // Fallback: load from DB settings table
+        try {
+            const llmSource = db.loadSetting('llm_source');
+            if (!llmSource) return frontendSettings || {};
+
+            const settings = { llmSource };
+            if (llmSource === 'openai') {
+                settings.apiUrl = db.loadSetting('openai_url') || 'https://api.openai.com/v1';
+                settings.apiKey = db.loadSetting('openai_api_key') || '';
+                settings.model = db.loadSetting('openai_model') || 'gpt-4o';
+            } else if (llmSource === 'anthropic') {
+                settings.apiKey = db.loadSetting('anthropic_api_key') || '';
+                settings.model = db.loadSetting('anthropic_model') || 'claude-3-5-sonnet-20241022';
+            } else if (llmSource === 'local') {
+                settings.apiUrl = db.loadSetting('ollama_url') || 'http://localhost:11434';
+                settings.model = db.loadSetting('ollama_model') || 'llama3';
+            } else if (llmSource === 'custom') {
+                settings.apiUrl = db.loadSetting('custom_url') || '';
+                settings.apiKey = db.loadSetting('custom_api_key') || '';
+                settings.model = db.loadSetting('custom_model') || '';
+            }
+
+            console.log('[resolveLlmSettings] Loaded from DB:', llmSource, settings.apiUrl ? `(url: ${settings.apiUrl})` : '');
+            return settings;
+        } catch (err) {
+            console.warn('[resolveLlmSettings] DB fallback failed:', err.message);
+            return frontendSettings || {};
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // POST /api/generate  — legacy one-shot generation (SSE)
     // -----------------------------------------------------------------------
     router.post('/generate', asyncRoute('Generation error', async (req, res) => {
@@ -49,7 +89,15 @@ module.exports = function({
     // -----------------------------------------------------------------------
     router.post('/games/:gameId/start', asyncRoute('Start game error', async (req, res) => {
         const game = getGameOrThrow(req.params.gameId);
-        const engine = new GameEngine(game.data, game.config, {
+
+        // Merge frontend settings into config, with DB fallback
+        const llmSettings = resolveLlmSettings(req.body?.settings);
+        const configWithSettings = {
+            ...game.config,
+            settings: llmSettings
+        };
+
+        const engine = new GameEngine(game.data, configWithSettings, {
             gameId: game.id,
             memoryService
         });
@@ -57,6 +105,7 @@ module.exports = function({
 
         game.state = gameState;
         game.engine = engine;
+        game.config = configWithSettings;
 
         // Persist state change to SQLite
         db.saveGame(game.id, game.config, game.data, game.state);
@@ -75,8 +124,15 @@ module.exports = function({
         }
 
         const restoredGameId = gameId || gameState.id || uuidv4();
-        const record = setGameRecord(restoredGameId, config, gameData);
-        const engine = new GameEngine(gameData, config, {
+
+        // Merge LLM settings with DB fallback
+        const configWithSettings = {
+            ...config,
+            settings: resolveLlmSettings(config.settings)
+        };
+
+        const record = setGameRecord(restoredGameId, configWithSettings, gameData);
+        const engine = new GameEngine(gameData, configWithSettings, {
             gameId: restoredGameId,
             memoryService
         });
@@ -109,9 +165,10 @@ module.exports = function({
             throw createHttpError(409, '游戏尚未启动');
         }
 
-        // If the frontend sends updated LLM settings, re-initialize the engine's LLM
-        if (settings && settings.llmSource) {
-            game.engine.reinitializeLLM(settings);
+        // Resolve LLM settings: use frontend-provided settings, or fall back to DB
+        const resolvedSettings = resolveLlmSettings(settings);
+        if (resolvedSettings.llmSource) {
+            game.engine.reinitializeLLM(resolvedSettings);
         }
 
         // 流式输出模式
@@ -342,9 +399,12 @@ module.exports = function({
 
         const gameId = uuidv4();
         const config = {
-            settings: req.body.settings || {},
+            settings: resolveLlmSettings(req.body.settings),
             gameType: example.type
         };
+
+        console.log('[examples/start] LLM settings:', config.settings.llmSource || '(none)',
+            config.settings.apiUrl ? `(url: ${config.settings.apiUrl})` : '');
 
         const record = setGameRecord(gameId, config, example);
         const engine = new GameEngine(example, config, {

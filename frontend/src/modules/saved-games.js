@@ -22,8 +22,45 @@ import {
 // ---------------------------------------------------------------------------
 
 export function saveSettings() {
-    localStorage.setItem(LLM_SETTINGS_KEY, JSON.stringify(collectLlmSettings()));
+    const llmSettings = collectLlmSettings();
+    localStorage.setItem(LLM_SETTINGS_KEY, JSON.stringify(llmSettings));
+
+    // Also persist LLM settings to the backend DB so GameEngine can load them as fallback
+    persistLlmSettingsToBackend(llmSettings).catch((err) => {
+        console.warn('Failed to persist LLM settings to backend:', err.message);
+    });
+
     saveGenerationSettings();
+}
+
+/**
+ * Save LLM settings to the backend settings DB for server-side fallback.
+ * This ensures GameEngine can initialize even when the frontend doesn't send settings.
+ */
+async function persistLlmSettingsToBackend(settings) {
+    if (!settings || !settings.llmSource) return;
+
+    const mapping = {
+        llm_source: settings.llmSource,
+    };
+
+    if (settings.llmSource === 'openai') {
+        mapping.openai_url = settings.apiUrl || '';
+        mapping.openai_api_key = settings.apiKey || '';
+        mapping.openai_model = settings.model || '';
+    } else if (settings.llmSource === 'anthropic') {
+        mapping.anthropic_api_key = settings.apiKey || '';
+        mapping.anthropic_model = settings.model || '';
+    } else if (settings.llmSource === 'local') {
+        mapping.ollama_url = settings.apiUrl || '';
+        mapping.ollama_model = settings.model || '';
+    } else if (settings.llmSource === 'custom') {
+        mapping.custom_url = settings.apiUrl || '';
+        mapping.custom_api_key = settings.apiKey || '';
+        mapping.custom_model = settings.model || '';
+    }
+
+    await requestJson('/settings/batch', createJsonRequest('POST', mapping));
 }
 
 export function loadSettings() {
