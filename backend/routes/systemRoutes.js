@@ -35,17 +35,36 @@ module.exports = function({
     // to avoid logging or caching unnecessary data.
     // -----------------------------------------------------------------------
     router.post('/test-connection', asyncRoute('Test connection error', async (req, res) => {
-        const { llmSource, apiKey, apiUrl, model, ollamaUrl, ollamaModel } = req.body || {};
+        const { llmSource, apiKey, apiUrl, model } = req.body || {};
+
+        // Build a normalized settings object for LLMService.initialize()
+        // The frontend `collectLlmSettings()` uses `apiUrl`/`model` for all sources,
+        // so we map them to what each LLM source expects.
+        const settings = { llmSource, model };
+
+        switch (llmSource) {
+            case 'openai':
+                settings.apiKey = apiKey;
+                settings.apiUrl = apiUrl || 'https://api.openai.com/v1';
+                break;
+            case 'anthropic':
+                settings.apiKey = apiKey;
+                break;
+            case 'local':
+                // Frontend sends `apiUrl` for Ollama URL
+                settings.apiUrl = apiUrl || 'http://localhost:11434';
+                settings.apiKey = 'ollama';
+                break;
+            case 'custom':
+                settings.apiKey = apiKey || 'custom';
+                settings.apiUrl = apiUrl;
+                break;
+            default:
+                return res.json({ success: false, error: '不支持的 LLM 来源' });
+        }
 
         const llm = new LLMService();
-        llm.initialize({
-            llmSource,
-            apiKey,
-            apiUrl,
-            model,
-            ollamaUrl,
-            ollamaModel
-        });
+        llm.initialize(settings);
         const result = await llm.testConnection();
         res.json(result);
     }));

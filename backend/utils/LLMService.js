@@ -28,6 +28,9 @@ class LLMService {
                 });
                 break;
             case 'custom':
+                if (!settings.apiUrl) {
+                    throw new Error('自定义接口必须提供接口地址');
+                }
                 this.client = new OpenAI({
                     apiKey: settings.apiKey || 'custom',
                     baseURL: settings.apiUrl
@@ -443,36 +446,73 @@ class LLMService {
 
         try {
             if (this.client.type === 'anthropic') {
-                const response = await fetch('https://api.anthropic.com/v1/messages', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-api-key': this.client.apiKey,
-                        'anthropic-version': '2023-06-01'
-                    },
-                    body: JSON.stringify({
-                        model: this.client.model || 'claude-3-5-sonnet-20241022',
-                        max_tokens: 10,
-                        messages: [{ role: 'user', content: '请回复 OK' }]
-                    })
-                });
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 15000);
 
-                if (!response.ok) {
-                    throw new Error(`API 返回 ${response.statusText}`);
+                try {
+                    const response = await fetch('https://api.anthropic.com/v1/messages', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-api-key': this.client.apiKey,
+                            'anthropic-version': '2023-06-01'
+                        },
+                        body: JSON.stringify({
+                            model: this.client.model || 'claude-3-5-sonnet-20241022',
+                            max_tokens: 10,
+                            messages: [{ role: 'user', content: '请回复 OK' }]
+                        }),
+                        signal: controller.signal
+                    });
+
+                    if (!response.ok) {
+                        const errorBody = await response.text().catch(() => '');
+                        throw new Error(`API 返回 ${response.status} ${response.statusText}: ${errorBody.slice(0, 200)}`);
+                    }
+
+                    return { success: true, model: this.client.model };
+                } finally {
+                    clearTimeout(timeout);
                 }
-
-                return { success: true, model: this.client.model };
             }
 
+            // OpenAI-compatible (openai / local / custom)
             const response = await this.client.chat.completions.create({
                 model: this.settings?.model || 'gpt-4o',
                 messages: [{ role: 'user', content: '请回复 OK' }],
                 max_tokens: 10
+            }, {
+                timeout: 15000 // 15-second timeout
             });
 
             return { success: true, model: response.model || this.settings?.model };
         } catch (error) {
-            return { success: false, error: error.message };
+            // Provide more specific error messages
+            let message = error.message || '';
+
+            // OpenAI SDK wraps some errors; dig into the cause
+            const cause = error.cause || error.error;
+            const causeCode = cause?.code || error.code;
+            const causeMessage = cause?.message || '';
+
+            if (causeCode === 'ECONNREFUSED' || message.includes('ECONNREFUSED') || causeMessage.includes('ECONNREFUSED')) {
+                message = '无法连接到服务器，请检查接口地址是否正确，以及目标服务是否已启动';
+            } else if (causeCode === 'ENOTFOUND' || message.includes('ENOTFOUND') || causeMessage.includes('ENOTFOUND')) {
+                message = '域名解析失败，请检查接口地址是否拼写正确';
+            } else if (error.name === 'AbortError' || causeCode === 'ETIMEDOUT' || causeCode === 'UND_ERR_CONNECT_TIMEOUT') {
+                message = '连接超时，请检查网络或接口地址是否可达';
+            } else if (error.status === 401 || cause?.status === 401) {
+                message = '认证失败 (401)，请检查 API 密钥是否正确';
+            } else if (error.status === 404 || cause?.status === 404) {
+                message = '接口地址无效 (404)，请检查 URL 路径是否正确（如 /v1/chat/completions）';
+            } else if (error.status === 429 || cause?.status === 429) {
+                message = '请求频率过高 (429)，请稍后重试';
+            } else if (message.includes('Invalid URL') || causeMessage.includes('Invalid URL')) {
+                message = '接口地址格式无效，请输入完整的 URL（如 https://api.example.com/v1）';
+            } else if (message.includes('Connection error')) {
+                message = '网络连接失败，请检查接口地址是否正确、目标服务是否已启动';
+            }
+            return { success: false, error: message };
         }
     }
 
