@@ -11,7 +11,7 @@ module.exports = function() {
      * Authenticates admin user and returns a JWT token.
      * Uses timing-safe comparison to prevent timing attacks.
      */
-    router.post('/api/auth/login', asyncRoute('Login error', (req, res) => {
+    router.post('/login', asyncRoute('Login error', (req, res) => {
         const { password } = req.body || {};
 
         // Simple password check using env variable
@@ -56,7 +56,7 @@ module.exports = function() {
      * GET /api/auth/verify
      * Verifies a JWT token and returns the decoded payload.
      */
-    router.get('/api/auth/verify', asyncRoute('Token verify error', (req, res) => {
+    router.get('/verify', asyncRoute('Token verify error', (req, res) => {
         const authHeader = req.headers.authorization;
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             return res.status(401).json({ valid: false, error: '未提供令牌' });

@@ -46,7 +46,7 @@ export async function loadAndRenderExamples() {
     grid.innerHTML = '<div class="loading">加载示例游戏中...</div>';
 
     try {
-        const examples = await requestJson(`/api/examples`);
+        const examples = await requestJson(`/examples`);
 
         const typeIcons = {
             fantasy: '🧙',
@@ -107,7 +107,7 @@ export async function startExampleGame(exampleId) {
         showScreen('loading-screen');
         updateProgress(10, '正在启动示例游戏...', '');
 
-        const response = await requestJson(`/api/examples/${exampleId}/start`, {
+        const response = await requestJson(`/examples/${exampleId}/start`, {
             method: 'POST',
             body: JSON.stringify({ settings })
         });

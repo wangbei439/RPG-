@@ -60,6 +60,7 @@ module.exports = function({
     // -----------------------------------------------------------------------
     // GET /api/comfyui/options
     // -----------------------------------------------------------------------
+    // GET /api/comfyui/options — also aliased as POST /models for frontend compat
     router.get('/options', asyncRoute('ComfyUI options error', async (req, res) => {
         const options = await imageService.getComfyUIOptions({
             comfyuiUrl: req.query.comfyuiUrl
@@ -67,10 +68,28 @@ module.exports = function({
         res.json(options);
     }));
 
+    // POST /api/comfyui/models — frontend sends POST with { url } body
+    router.post('/models', asyncRoute('ComfyUI models error', async (req, res) => {
+        const { url } = req.body || {};
+        const options = await imageService.getComfyUIOptions({
+            comfyuiUrl: url || req.query.comfyuiUrl
+        });
+        res.json(options);
+    }));
+
     // -----------------------------------------------------------------------
     // GET /api/comfyui/workflows
     // -----------------------------------------------------------------------
+    // GET /api/comfyui/workflows
     router.get('/workflows', asyncRoute('ComfyUI workflows error', async (_req, res) => {
+        res.json({
+            directory: COMFY_WORKFLOWS_DIR,
+            workflows: listComfyWorkflowFiles()
+        });
+    }));
+
+    // POST /api/comfyui/workflows — frontend sends POST with { url } body
+    router.post('/workflows', asyncRoute('ComfyUI workflows list error', async (req, res) => {
         res.json({
             directory: COMFY_WORKFLOWS_DIR,
             workflows: listComfyWorkflowFiles()
@@ -80,8 +99,26 @@ module.exports = function({
     // -----------------------------------------------------------------------
     // GET /api/comfyui/workflows/:fileName
     // -----------------------------------------------------------------------
+    // GET /api/comfyui/workflows/:fileName
     router.get('/workflows/:fileName', asyncRoute('ComfyUI workflow file error', async (req, res) => {
         const fullPath = resolveComfyWorkflowFile(req.params.fileName);
+        const content = fs.readFileSync(fullPath, 'utf8');
+
+        res.json({
+            name: path.basename(fullPath),
+            path: fullPath,
+            content
+        });
+    }));
+
+    // POST /api/comfyui/workflow/load — frontend sends POST with { url, file }
+    router.post('/workflow/load', asyncRoute('ComfyUI workflow load error', async (req, res) => {
+        const { file } = req.body || {};
+        const fileName = file || req.body?.fileName;
+        if (!fileName) {
+            throw createHttpError(400, '缺少工作流文件名');
+        }
+        const fullPath = resolveComfyWorkflowFile(fileName);
         const content = fs.readFileSync(fullPath, 'utf8');
 
         res.json({
@@ -102,7 +139,14 @@ module.exports = function({
     // -----------------------------------------------------------------------
     // POST /api/comfyui/validate-workflow
     // -----------------------------------------------------------------------
+    // POST /api/comfyui/validate-workflow (also aliased as /validate for frontend compat)
     router.post('/validate-workflow', asyncRoute('ComfyUI workflow validation error', async (req, res) => {
+        const result = await imageService.validateComfyUIWorkflow(req.body || {});
+        res.json(result);
+    }));
+
+    // POST /api/comfyui/validate — frontend alias
+    router.post('/validate', asyncRoute('ComfyUI workflow validation error', async (req, res) => {
         const result = await imageService.validateComfyUIWorkflow(req.body || {});
         res.json(result);
     }));
