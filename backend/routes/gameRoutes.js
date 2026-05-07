@@ -99,7 +99,7 @@ module.exports = function({
     // -----------------------------------------------------------------------
     router.post('/games/:gameId/action', asyncRoute('Process action error', async (req, res) => {
         const game = getGameOrThrow(req.params.gameId);
-        const { action, streaming } = req.body;
+        const { action, streaming, settings } = req.body;
 
         if (!action) {
             throw createHttpError(400, '缺少 action');
@@ -107,6 +107,11 @@ module.exports = function({
 
         if (!game.engine) {
             throw createHttpError(409, '游戏尚未启动');
+        }
+
+        // If the frontend sends updated LLM settings, re-initialize the engine's LLM
+        if (settings && settings.llmSource) {
+            game.engine.reinitializeLLM(settings);
         }
 
         // 流式输出模式

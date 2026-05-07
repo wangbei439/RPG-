@@ -3,7 +3,7 @@
  */
 
 import { requestJson, createJsonRequest } from '../services/api.js';
-import { collectGenerationConfig } from '../services/settings.js';
+import { collectGenerationConfig, collectLlmSettings } from '../services/settings.js';
 import { getGameWebSocket } from '../services/websocket.js';
 import { state, API_BASE, GENERATION_SETTINGS_KEY } from './state.js';
 import { escapeHtml, escapeAttribute, normalizeGenerationConfig, getEffectiveGenerationConfig } from './utils.js';
@@ -527,7 +527,8 @@ async function sendPlayerActionStreaming(action, imageConfig) {
         body: JSON.stringify({
             action,
             imageConfig,
-            streaming: true
+            streaming: true,
+            settings: collectLlmSettings()
         })
     });
 
@@ -594,7 +595,8 @@ async function sendPlayerActionNormal(action, imageConfig) {
         `/games/${state.currentGameId}/action`,
         createJsonRequest('POST', {
             action,
-            imageConfig
+            imageConfig,
+            settings: collectLlmSettings()
         })
     );
 

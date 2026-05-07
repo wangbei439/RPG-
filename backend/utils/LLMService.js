@@ -51,7 +51,7 @@ class LLMService {
 
     async generateText(prompt, options = {}) {
         if (!this.client) {
-            this.initialize(this.getDefaultSettings());
+            throw new Error('LLM 未初始化，请先调用 initialize() 并提供有效的 API 配置');
         }
 
         const model = this.settings?.model || 'gpt-4o';
@@ -119,7 +119,7 @@ class LLMService {
         const jsonPrompt = `${prompt}\n\n请只返回有效的 JSON，不要包含代码块、解释或额外文字。确保结果可以被直接解析。`;
 
         if (!this.client) {
-            this.initialize(this.getDefaultSettings());
+            throw new Error('LLM 未初始化，请先调用 initialize() 并提供有效的 API 配置');
         }
 
         const model = this.settings?.model || 'gpt-4o';
@@ -193,7 +193,7 @@ class LLMService {
      */
     async generateTextStreaming(prompt, onChunk, options = {}) {
         if (!this.client) {
-            this.initialize(this.getDefaultSettings());
+            throw new Error('LLM 未初始化，请先调用 initialize() 并提供有效的 API 配置');
         }
 
         const model = this.settings?.model || 'gpt-4o';
@@ -449,7 +449,7 @@ class LLMService {
 
     async testConnection() {
         if (!this.client) {
-            this.initialize(this.getDefaultSettings());
+            return { success: false, error: 'LLM 未初始化，请先配置 AI 模型' };
         }
 
         try {

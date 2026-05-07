@@ -9,6 +9,10 @@ class GameEngine {
         this.gameData = gameData;
         this.config = config;
         this.llm = new LLMService();
+        // Initialize LLM immediately if settings are provided
+        if (this.config?.settings?.llmSource) {
+            this.llm.initialize(this.config.settings);
+        }
         this.state = null;
         this.gameId = services.gameId || gameData?.id || null;
         this.memoryService = services.memoryService || null;
@@ -32,8 +36,23 @@ class GameEngine {
         this.predictiveEngine = new PredictiveEngine(this);
     }
 
+    /**
+     * Re-initialize the LLM with updated settings.
+     * Called when the user changes LLM settings while a game is in progress.
+     */
+    reinitializeLLM(settings) {
+        if (!settings || !settings.llmSource) {
+            return;
+        }
+        this.config.settings = settings;
+        this.llm.initialize(settings);
+        console.log('[GameEngine.reinitializeLLM] Updated to:', settings.llmSource,
+            settings.apiUrl ? `(baseURL: ${this.llm.client?.baseURL || this.llm.client?.type})` : '');
+    }
+
     async restore(state) {
-        if (this.config?.settings?.llmSource) {
+        // LLM already initialized in constructor, but re-verify
+        if (this.config?.settings?.llmSource && !this.llm.client) {
             this.llm.initialize(this.config.settings);
         }
         this.state = await this.normalizeRestoredState(state);
@@ -46,8 +65,12 @@ class GameEngine {
     }
 
     async start() {
-        if (this.config?.settings?.llmSource) {
+        // LLM already initialized in constructor, but re-verify
+        if (this.config?.settings?.llmSource && !this.llm.client) {
             this.llm.initialize(this.config.settings);
+        }
+        if (!this.llm.client) {
+            console.warn('[GameEngine.start] WARNING: LLM client not initialized! config.settings:', JSON.stringify(this.config?.settings?.llmSource || '(none)'));
         }
         this.state = this.createInitialState();
         this.state.visualDirectives = this.buildVisualDirectives({});
@@ -164,6 +187,14 @@ class GameEngine {
     }
 
     async processAction(action) {
+        // Ensure LLM is initialized before processing
+        if (!this.llm.client) {
+            if (this.config?.settings?.llmSource) {
+                this.llm.initialize(this.config.settings);
+            } else {
+                throw new Error('LLM 未初始化，请在设置中配置 AI 模型');
+            }
+        }
         if (this.state.gameOver) {
             return { response: '游戏已经结束。', gameState: this.state };
         }
@@ -240,6 +271,14 @@ class GameEngine {
      * 流式处理动作（新增）
      */
     async processActionStreaming(action, onChunk) {
+        // Ensure LLM is initialized before processing
+        if (!this.llm.client) {
+            if (this.config?.settings?.llmSource) {
+                this.llm.initialize(this.config.settings);
+            } else {
+                throw new Error('LLM 未初始化，请在设置中配置 AI 模型');
+            }
+        }
         if (this.state.gameOver) {
             onChunk({ type: 'complete', response: '游戏已经结束。', gameState: this.state });
             return;
