@@ -31,9 +31,17 @@ class LLMService {
                 if (!settings.apiUrl) {
                     throw new Error('自定义接口必须提供接口地址');
                 }
+                if (!settings.model) {
+                    throw new Error('自定义接口必须提供模型名称');
+                }
+                // Auto-append /v1 if the URL looks like a base domain without API path
+                let customBaseURL = settings.apiUrl.replace(/\/+$/, '');
+                if (!customBaseURL.match(/\/v\d(?:\/|$)/i)) {
+                    customBaseURL += '/v1';
+                }
                 this.client = new OpenAI({
                     apiKey: settings.apiKey || 'custom',
-                    baseURL: settings.apiUrl
+                    baseURL: customBaseURL
                 });
                 break;
             default:
@@ -477,8 +485,10 @@ class LLMService {
             }
 
             // OpenAI-compatible (openai / local / custom)
+            const modelName = this.settings?.model
+                || (this.settings?.llmSource === 'local' ? 'llama3' : 'gpt-4o');
             const response = await this.client.chat.completions.create({
-                model: this.settings?.model || 'gpt-4o',
+                model: modelName,
                 messages: [{ role: 'user', content: '请回复 OK' }],
                 max_tokens: 10
             }, {

@@ -56,6 +56,9 @@ module.exports = function({
                 settings.apiKey = 'ollama';
                 break;
             case 'custom':
+                if (!model) {
+                    return res.json({ success: false, error: '自定义接口必须提供模型名称' });
+                }
                 settings.apiKey = apiKey || 'custom';
                 settings.apiUrl = apiUrl;
                 break;
