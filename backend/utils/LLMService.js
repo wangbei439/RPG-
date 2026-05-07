@@ -497,6 +497,17 @@ class LLMService {
 
             return { success: true, model: response.model || this.settings?.model };
         } catch (error) {
+            // Debug: log the full raw error for troubleshooting
+            console.error('[testConnection] Raw error:', {
+                name: error.name,
+                message: error.message,
+                status: error.status,
+                code: error.code,
+                causeCode: error.cause?.code,
+                causeMessage: error.cause?.message?.slice(0, 200),
+                causeType: error.cause?.constructor?.name,
+            });
+
             // Provide more specific error messages
             let message = error.message || '';
 
@@ -505,24 +516,28 @@ class LLMService {
             const causeCode = cause?.code || error.code;
             const causeMessage = cause?.message || '';
 
+            // Include the actual URL attempted for better diagnostics
+            const attemptedBaseURL = this.client?.baseURL || this.settings?.apiUrl || '';
+            const urlHint = attemptedBaseURL ? `（请求地址：${attemptedBaseURL}/chat/completions）` : '';
+
             if (causeCode === 'ECONNREFUSED' || message.includes('ECONNREFUSED') || causeMessage.includes('ECONNREFUSED')) {
-                message = '无法连接到服务器，请检查接口地址是否正确，以及目标服务是否已启动';
+                message = `无法连接到服务器${urlHint}，请检查接口地址是否正确，以及目标服务是否已启动`;
             } else if (causeCode === 'ENOTFOUND' || message.includes('ENOTFOUND') || causeMessage.includes('ENOTFOUND')) {
-                message = '域名解析失败，请检查接口地址是否拼写正确';
+                message = `域名解析失败${urlHint}，请检查接口地址是否拼写正确`;
             } else if (error.name === 'AbortError' || causeCode === 'ETIMEDOUT' || causeCode === 'UND_ERR_CONNECT_TIMEOUT') {
-                message = '连接超时，请检查网络或接口地址是否可达';
+                message = `连接超时${urlHint}，请检查网络或接口地址是否可达`;
             } else if (error.status === 401 || cause?.status === 401) {
                 message = '认证失败 (401)，请检查 API 密钥是否正确';
             } else if (error.status === 404 || cause?.status === 404) {
-                message = '接口地址无效 (404)，请检查 URL 路径是否正确（如 /v1/chat/completions）';
+                message = `接口地址无效 (404)${urlHint}，请检查 URL 路径是否正确`;
             } else if (error.status === 429 || cause?.status === 429) {
                 message = '请求频率过高 (429)，请稍后重试';
             } else if (message.includes('Invalid URL') || causeMessage.includes('Invalid URL')) {
                 message = '接口地址格式无效，请输入完整的 URL（如 https://api.example.com/v1）';
             } else if (message.includes('Connection error')) {
-                message = '网络连接失败，请检查接口地址是否正确、目标服务是否已启动';
+                message = `网络连接失败${urlHint}，请检查接口地址是否正确、目标服务是否已启动`;
             }
-            return { success: false, error: message };
+            return { success: false, error: message, _debug: { attemptedBaseURL, causeCode, causeType: cause?.constructor?.name } };
         }
     }
 
