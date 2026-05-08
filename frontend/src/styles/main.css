@@ -1398,6 +1398,129 @@ body {
     border-radius: var(--radius-sm);
 }
 
+/* 骰子检定样式 */
+.log-entry.dice-check {
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius);
+    margin-bottom: 0.75rem;
+    animation: scaleIn 0.4s ease;
+    border: 1px solid;
+}
+
+.log-entry.dice-check.dice-success {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.12), rgba(34, 197, 94, 0.03));
+    border-color: rgba(34, 197, 94, 0.4);
+}
+
+.log-entry.dice-check.dice-failure {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(239, 68, 68, 0.03));
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+.dice-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.dice-icon {
+    font-size: 1.5rem;
+    line-height: 1;
+}
+
+.dice-label {
+    font-weight: 700;
+    font-size: 0.95rem;
+    letter-spacing: 0.05em;
+}
+
+.dice-label.critical-success {
+    color: #4ade80;
+    text-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+    animation: pulse 0.5s ease 3;
+}
+
+.dice-label.critical-failure {
+    color: #f87171;
+    text-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+    animation: pulse 0.5s ease 3;
+}
+
+.dice-success .dice-label {
+    color: var(--success);
+}
+
+.dice-failure .dice-label {
+    color: var(--danger);
+}
+
+.dice-details {
+    padding-left: 2rem;
+}
+
+.dice-reason {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin-bottom: 0.35rem;
+}
+
+.dice-roll-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    font-family: 'SFMono-Regular', 'Consolas', monospace;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.dice-stat {
+    color: var(--primary-light);
+    font-weight: 600;
+}
+
+.dice-formula {
+    color: var(--text-muted);
+}
+
+.dice-total {
+    color: var(--text-primary);
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+
+.dice-vs {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.dice-difficulty {
+    color: var(--warning);
+    font-weight: 600;
+}
+
+.dice-bar {
+    height: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.dice-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dice-bar-fill.success {
+    background: linear-gradient(90deg, #22c55e, #4ade80);
+}
+
+.dice-bar-fill.failure {
+    background: linear-gradient(90deg, #ef4444, #f87171);
+}
+
 .log-entry .speaker {
     font-weight: 600;
     color: var(--primary-light);
@@ -1611,6 +1734,94 @@ body {
 .quest-log li.completed {
     text-decoration: line-through;
     opacity: 0.6;
+}
+
+/* 角色关系面板 */
+.character-relations h3 {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.character-relations ul {
+    list-style: none;
+}
+
+.character-item {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid rgba(71, 85, 105, 0.5);
+}
+
+.character-item:last-child {
+    border-bottom: none;
+}
+
+.character-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.3rem;
+}
+
+.character-name {
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.character-rel {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 10px;
+}
+
+.character-rel.ally {
+    color: #4ade80;
+    background: rgba(34, 197, 94, 0.15);
+}
+
+.character-rel.neutral {
+    color: var(--text-secondary);
+    background: rgba(148, 163, 184, 0.15);
+}
+
+.character-rel.hostile {
+    color: #f87171;
+    background: rgba(239, 68, 68, 0.15);
+}
+
+.character-state {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.relationship-bar {
+    height: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 2px;
+    margin-top: 0.35rem;
+    overflow: hidden;
+}
+
+.relationship-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.4s ease;
+}
+
+.relationship-bar-fill.ally {
+    background: linear-gradient(90deg, #22c55e, #4ade80);
+}
+
+.relationship-bar-fill.neutral {
+    background: linear-gradient(90deg, #6366f1, #818cf8);
+}
+
+.relationship-bar-fill.hostile {
+    background: linear-gradient(90deg, #ef4444, #f87171);
 }
 
 /* Modal */

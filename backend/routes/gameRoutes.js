@@ -11,40 +11,68 @@ const logger = require('../middleware/logger');
  * Merge frontend LLM settings with backend DB settings.
  * Frontend may send empty or masked (containing ***) values for sensitive fields.
  * In those cases, fall back to the value stored in the SQLite settings table.
+ * Supports all llmSource types: openai, anthropic, local, custom.
  */
 function resolveLlmSettings(frontendSettings = {}, dbModule) {
-    const dbSettings = dbModule.loadAllSettings({ revealSecrets: true });
+    const merged = { ...(frontendSettings || {}) };
 
-    const KEY_MAP = {
-        llmSource: 'llm_source',
-        apiUrl:   'openai_url',
-        apiKey:   'openai_api_key',
-        model:    'openai_model'
+    // Load all DB settings at once
+    let dbSettings = {};
+    try {
+        dbSettings = dbModule.loadAllSettings({ revealSecrets: true }) || {};
+    } catch (err) {
+        console.warn('[resolveLlmSettings] DB load failed:', err.message);
+    }
+
+    // If llmSource is not provided by frontend, derive from DB
+    if (!merged.llmSource) {
+        merged.llmSource = dbSettings.llm_source || 'openai';
+    }
+
+    // Per-source DB key mapping — map each frontend field to its DB column
+    const SOURCE_KEY_MAPS = {
+        openai:    { apiUrl: 'openai_url',    apiKey: 'openai_api_key',    model: 'openai_model' },
+        anthropic: { apiKey: 'anthropic_api_key', model: 'anthropic_model' },
+        local:     { apiUrl: 'ollama_url',    model: 'ollama_model' },
+        custom:    { apiUrl: 'custom_url',    apiKey: 'custom_api_key',   model: 'custom_model' }
     };
 
-    const merged = { ...frontendSettings };
+    const keyMap = SOURCE_KEY_MAPS[merged.llmSource] || SOURCE_KEY_MAPS.openai;
 
-    for (const [feKey, dbKey] of Object.entries(KEY_MAP)) {
+    // For each mapped field: if frontend value is missing/empty/masked, use DB value
+    for (const [feKey, dbKey] of Object.entries(keyMap)) {
         const feVal = merged[feKey];
-        const dbVal = dbSettings[dbKey];
-
-        // Use DB value when frontend value is missing, empty, or masked
         if (!feVal || (typeof feVal === 'string' && feVal.includes('***'))) {
+            const dbVal = dbSettings[dbKey];
             if (dbVal !== undefined && dbVal !== null && dbVal !== '') {
                 merged[feKey] = dbVal;
             }
         }
     }
 
-    // If llmSource still not set, derive from DB or default to 'openai'
-    if (!merged.llmSource) {
-        merged.llmSource = dbSettings.llm_source || 'openai';
+    // Sensible defaults if still missing
+    if (!merged.apiUrl) {
+        const defaultUrls = {
+            openai: 'https://api.openai.com/v1',
+            local: 'http://localhost:11434',
+            custom: dbSettings.custom_url || dbSettings.openai_url || ''
+        };
+        merged.apiUrl = defaultUrls[merged.llmSource] || '';
     }
 
-    // If apiUrl still not set, use a sensible default
-    if (!merged.apiUrl) {
-        merged.apiUrl = dbSettings.openai_url || 'https://api.openai.com/v1';
+    if (!merged.model) {
+        const defaultModels = {
+            openai: 'gpt-4o',
+            anthropic: 'claude-3-5-sonnet-20241022',
+            local: 'llama3',
+            custom: dbSettings.custom_model || dbSettings.openai_model || ''
+        };
+        merged.model = defaultModels[merged.llmSource] || '';
     }
+
+    console.log('[resolveLlmSettings]', merged.llmSource, 
+        merged.apiUrl ? `(url: ${merged.apiUrl})` : '',
+        merged.model ? `(model: ${merged.model})` : '');
 
     return merged;
 }
@@ -59,46 +87,6 @@ module.exports = function({
 
     // Broadcast helper — imported from websocket module
     const { broadcastImageReady } = require('../websocket');
-
-    // -----------------------------------------------------------------------
-    // Helper: resolve LLM settings with DB fallback
-    // If the frontend provides settings with llmSource, use them directly.
-    // Otherwise, try to load persisted settings from the SQLite database.
-    // -----------------------------------------------------------------------
-    function resolveLlmSettings(frontendSettings) {
-        if (frontendSettings && frontendSettings.llmSource) {
-            return frontendSettings;
-        }
-
-        // Fallback: load from DB settings table
-        try {
-            const llmSource = db.loadSetting('llm_source');
-            if (!llmSource) return frontendSettings || {};
-
-            const settings = { llmSource };
-            if (llmSource === 'openai') {
-                settings.apiUrl = db.loadSetting('openai_url') || 'https://api.openai.com/v1';
-                settings.apiKey = db.loadSetting('openai_api_key') || '';
-                settings.model = db.loadSetting('openai_model') || 'gpt-4o';
-            } else if (llmSource === 'anthropic') {
-                settings.apiKey = db.loadSetting('anthropic_api_key') || '';
-                settings.model = db.loadSetting('anthropic_model') || 'claude-3-5-sonnet-20241022';
-            } else if (llmSource === 'local') {
-                settings.apiUrl = db.loadSetting('ollama_url') || 'http://localhost:11434';
-                settings.model = db.loadSetting('ollama_model') || 'llama3';
-            } else if (llmSource === 'custom') {
-                settings.apiUrl = db.loadSetting('custom_url') || '';
-                settings.apiKey = db.loadSetting('custom_api_key') || '';
-                settings.model = db.loadSetting('custom_model') || '';
-            }
-
-            console.log('[resolveLlmSettings] Loaded from DB:', llmSource, settings.apiUrl ? `(url: ${settings.apiUrl})` : '');
-            return settings;
-        } catch (err) {
-            console.warn('[resolveLlmSettings] DB fallback failed:', err.message);
-            return frontendSettings || {};
-        }
-    }
 
     // -----------------------------------------------------------------------
     // POST /api/generate  — legacy one-shot generation (SSE)

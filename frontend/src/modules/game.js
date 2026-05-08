@@ -626,6 +626,11 @@ async function sendPlayerActionStreaming(action, imageConfig) {
 
                     showChoices(chunk.choices || []);
                     renderGameState(chunk.gameState || state.gameState);
+
+                    // 显示骰子检定结果
+                    if (chunk.diceCheck) {
+                        showDiceCheckResult(chunk.diceCheck);
+                    }
                 }
             } catch (e) {
                 console.error('解析流式数据失败:', e);
@@ -662,6 +667,11 @@ async function sendPlayerActionNormal(action, imageConfig) {
 
     if (result.gameOver && result.gameOverMessage) {
         appendLog('system', result.gameOverMessage);
+    }
+
+    // 显示骰子检定结果
+    if (result.diceCheck) {
+        showDiceCheckResult(result.diceCheck);
     }
 
     showChoices(result.choices || []);
@@ -708,6 +718,112 @@ function appendLog(type, content, speaker = '') {
 
     // 返回 contentEl 以便流式更新
     return contentEl;
+}
+
+// ---------------------------------------------------------------------------
+// Dice check animation & display
+// ---------------------------------------------------------------------------
+
+/**
+ * 显示骰子检定动画和结果
+ */
+function showDiceCheckResult(diceCheck) {
+    if (!diceCheck) return;
+
+    const log = document.getElementById('game-log');
+    if (!log) return;
+
+    const entry = document.createElement('div');
+    entry.className = `log-entry dice-check ${diceCheck.success ? 'dice-success' : 'dice-failure'}`;
+
+    // 骰子图标和结果
+    const header = document.createElement('div');
+    header.className = 'dice-header';
+
+    const icon = document.createElement('span');
+    icon.className = 'dice-icon';
+    icon.textContent = '🎲';
+
+    const label = document.createElement('span');
+    label.className = 'dice-label';
+    if (diceCheck.criticalType === 'success') {
+        label.textContent = '大成功！';
+        label.className += ' critical-success';
+    } else if (diceCheck.criticalType === 'failure') {
+        label.textContent = '大失败！';
+        label.className += ' critical-failure';
+    } else {
+        label.textContent = diceCheck.success ? '检定成功' : '检定失败';
+    }
+
+    header.appendChild(icon);
+    header.appendChild(label);
+    entry.appendChild(header);
+
+    // 检定详情
+    const details = document.createElement('div');
+    details.className = 'dice-details';
+
+    const reasonEl = document.createElement('div');
+    reasonEl.className = 'dice-reason';
+    reasonEl.textContent = diceCheck.reason || `${diceCheck.stat}检定`;
+    details.appendChild(reasonEl);
+
+    const rollInfo = document.createElement('div');
+    rollInfo.className = 'dice-roll-info';
+    rollInfo.innerHTML = `
+        <span class="dice-stat">${escapeHtml(diceCheck.stat)}</span>
+        <span class="dice-formula">1d20(${diceCheck.roll}) ${diceCheck.modifier >= 0 ? '+' : ''}${diceCheck.modifier}</span>
+        <span class="dice-total">${diceCheck.total}</span>
+        <span class="dice-vs">vs</span>
+        <span class="dice-difficulty">${diceCheck.difficulty}</span>
+    `;
+    details.appendChild(rollInfo);
+
+    // 结果条
+    const bar = document.createElement('div');
+    bar.className = 'dice-bar';
+
+    const barFill = document.createElement('div');
+    barFill.className = `dice-bar-fill ${diceCheck.success ? 'success' : 'failure'}`;
+    const percentage = Math.min(100, Math.max(0, (diceCheck.total / Math.max(diceCheck.difficulty, 1)) * 100));
+    barFill.style.width = '0%';
+
+    bar.appendChild(barFill);
+    details.appendChild(bar);
+    entry.appendChild(details);
+
+    // 插入到日志最前面（最新消息的上面），使骰子结果紧挨着对应行动
+    log.appendChild(entry);
+
+    // 动画：延迟填充进度条
+    requestAnimationFrame(() => {
+        setTimeout(() => {
+            barFill.style.width = `${percentage}%`;
+        }, 100);
+    });
+
+    // 骰子滚动动画
+    animateDiceRoll(icon, diceCheck.roll);
+
+    log.scrollTop = log.scrollHeight;
+}
+
+/**
+ * 骰子滚动动画
+ */
+function animateDiceRoll(iconEl, finalValue) {
+    const frames = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+    let count = 0;
+    const maxCount = 10;
+    const interval = setInterval(() => {
+        iconEl.textContent = frames[count % frames.length];
+        count++;
+        if (count >= maxCount) {
+            clearInterval(interval);
+            iconEl.textContent = `🎲${finalValue}`;
+        }
+    }, 80);
 }
 
 // ---------------------------------------------------------------------------
@@ -967,6 +1083,36 @@ function renderQuests(quests = []) {
             ${quest.progress ? ` · ${escapeHtml(quest.progress)}` : ''}
         </li>
     `).join('');
+}
+
+function renderCharacterRelations(characterStates = []) {
+    const list = document.getElementById('character-list');
+    if (!list) return;
+
+    if (!Array.isArray(characterStates) || !characterStates.length) {
+        list.innerHTML = '<li>暂无角色</li>';
+        return;
+    }
+
+    list.innerHTML = characterStates.map((char) => {
+        const rel = char.relationship || 0;
+        const relClass = rel > 20 ? 'ally' : (rel < -20 ? 'hostile' : 'neutral');
+        const relLabel = rel > 50 ? '挚友' : (rel > 20 ? '友好' : (rel > -20 ? '中立' : (rel > -50 ? '冷淡' : '敌对')));
+        const moodIcon = char.mood === '愤怒' ? '😠' : (char.mood === '悲伤' ? '😢' : (char.mood === '开心' ? '😊' : (char.mood === '恐惧' ? '😰' : '🙂')));
+
+        return `
+            <li class="character-item ${relClass}">
+                <div class="character-header">
+                    <span class="character-name">${moodIcon} ${escapeHtml(char.name || '未知')}</span>
+                    <span class="character-rel ${relClass}">${rel >= 0 ? '+' : ''}${rel} ${relLabel}</span>
+                </div>
+                ${char.state ? `<span class="character-state">${escapeHtml(char.state)}</span>` : ''}
+                <div class="relationship-bar">
+                    <div class="relationship-bar-fill ${relClass}" style="width: ${Math.min(100, Math.max(0, 50 + rel))}%"></div>
+                </div>
+            </li>
+        `;
+    }).join('');
 }
 
 // ---------------------------------------------------------------------------
@@ -1246,6 +1392,7 @@ export function renderGameState(gameState = state.gameState) {
     renderStats(gameState.player?.stats || {});
     renderInventory(gameState.inventory || []);
     renderQuests(gameState.quests || []);
+    renderCharacterRelations(gameState.characterStates || []);
     syncSceneImageControls();
     scheduleRuntimeSnapshotPersist();
 

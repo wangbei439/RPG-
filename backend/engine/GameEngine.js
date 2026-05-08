@@ -186,6 +186,91 @@ class GameEngine {
         return JSON.parse(JSON.stringify(state));
     }
 
+    // -----------------------------------------------------------------------
+    // Dice check system
+    // -----------------------------------------------------------------------
+
+    /**
+     * 执行骰子检定（1d20 + 属性修饰 vs 难度等级）
+     * @param {string} stat - 属性名（如"力量""智力"等）
+     * @param {number} difficulty - 难度等级 1-25
+     * @param {string} reason - 检定原因
+     * @returns {Object} { roll, modifier, total, difficulty, success, critical, stat, reason }
+     */
+    performDiceCheck(stat, difficulty, reason = '') {
+        // 掷1d20
+        const roll = Math.floor(Math.random() * 20) + 1;
+
+        // 获取属性修饰值
+        let modifier = 0;
+        const statValue = this.state?.player?.stats?.[stat];
+        if (statValue !== undefined) {
+            if (typeof statValue === 'object' && statValue !== null) {
+                // HP/MP 类：用 current/max 的比例作为修饰
+                modifier = Math.floor((statValue.current || 0) / 10);
+            } else if (typeof statValue === 'number') {
+                // 数值属性：修饰 = Math.floor((属性 - 10) / 2)，D&D 风格
+                modifier = Math.floor((statValue - 10) / 2);
+            }
+        }
+
+        const total = roll + modifier;
+        const success = total >= difficulty;
+        const critical = roll === 20; // 大成功
+        const criticalFail = roll === 1; // 大失败
+
+        return {
+            stat,
+            roll,
+            modifier,
+            total,
+            difficulty,
+            success: critical ? true : (criticalFail ? false : success),
+            critical: critical || criticalFail,
+            criticalType: critical ? 'success' : (criticalFail ? 'failure' : null),
+            reason
+        };
+    }
+
+    /**
+     * 将骰子检定结果注入到 AI 结果中
+     */
+    injectDiceCheckResult(result) {
+        if (!result.diceCheck || !result.diceCheck.stat) {
+            return null;
+        }
+
+        const { stat, difficulty, reason } = result.diceCheck;
+        const dcResult = this.performDiceCheck(stat, difficulty, reason);
+
+        // 根据检定结果修改旁白
+        if (result.narration) {
+            const outcomeTag = dcResult.success ? '【检定成功】' : '【检定失败】';
+            const rollInfo = `[${stat}检定: 掷骰${dcResult.roll} + 修饰${dcResult.modifier >= 0 ? '+' : ''}${dcResult.modifier} = ${dcResult.total} vs 难度${dcResult.difficulty}]`;
+
+            if (dcResult.criticalType === 'success') {
+                result.narration = `【大成功！】${rollInfo}\n${result.narration}`;
+            } else if (dcResult.criticalType === 'failure') {
+                result.narration = `【大失败！】${rollInfo}\n${result.narration}`;
+            } else {
+                result.narration = `${outcomeTag}${rollInfo}\n${result.narration}`;
+            }
+
+            // 检定失败时增加负面效果
+            if (!dcResult.success) {
+                if (!result.statChanges) result.statChanges = {};
+                // 失败时扣少量生命值
+                if (this.state?.player?.stats?.生命值) {
+                    result.statChanges.生命值 = result.statChanges.生命值 || 0;
+                    result.statChanges.生命值 -= (dcResult.criticalType === 'failure' ? 10 : 5);
+                }
+            }
+        }
+
+        result.diceCheckResult = dcResult;
+        return dcResult;
+    }
+
     async processAction(action) {
         // Ensure LLM is initialized before processing
         if (!this.llm.client) {
@@ -231,6 +316,9 @@ class GameEngine {
 
         this.updateState(result);
 
+        // 骰子检定
+        const diceResult = this.injectDiceCheckResult(result);
+
         // 更新语义记忆
         this.updateSemanticMemory(action, result);
 
@@ -263,6 +351,7 @@ class GameEngine {
             gameOver: this.state.gameOver,
             gameOverMessage: this.state.gameOverMessage,
             recalledMemories: context.recalledMemories || [],
+            diceCheck: result.diceCheckResult || null,
             validation: validation.valid ? null : validation
         };
     }
@@ -355,6 +444,9 @@ class GameEngine {
 
         this.updateState(fullResult);
 
+        // 骰子检定
+        const diceResult = this.injectDiceCheckResult(fullResult);
+
         // 更新语义记忆
         this.updateSemanticMemory(action, fullResult);
 
@@ -387,6 +479,7 @@ class GameEngine {
             visualSceneChanged,
             gameOver: this.state.gameOver,
             gameOverMessage: this.state.gameOverMessage,
+            diceCheck: fullResult.diceCheckResult || null,
             validation: validation.valid ? null : validation
         });
     }
@@ -575,6 +668,16 @@ class GameEngine {
             `风格要求：${template.systemPrompt}`,
             '所有旁白、对白、选项和提示都必须使用中文。',
             '请严格只返回 JSON，不要输出解释。',
+            '',
+            '【骰子检定系统】',
+            '当玩家行动涉及风险或不确定性时（如战斗、说服、潜行、破解机关等），你必须返回 diceCheck 字段：',
+            '- stat: 检定属性名（如"力量""智力""魅力""敏捷"等，必须是玩家已有的属性）',
+            '- difficulty: 难度等级 1-25（5极简/10简单/15普通/20困难/25极难）',
+            '- reason: 为什么需要检定（如"你需要说服守卫让你通过"）',
+            '对于纯叙事或确定性动作，不返回 diceCheck。',
+            '检定结果由系统掷骰决定（1d20 + 属性值 vs 难度等级），你只需设定属性和难度。',
+            '旁白应该体现检定结果带来的不同后果。',
+            '',
             `世界观摘要：${compactWorldview}`,
             `当前章节摘要：${compactChapter}`,
             `玩家状态摘要：${compactPlayer}`,
@@ -587,8 +690,8 @@ class GameEngine {
             `知识图谱事实：${compactGraphFacts}`,
             `玩家行动：${action}`,
             '请返回如下结构：',
-            '{"narration":"旁白描述","dialogues":[{"speaker":"角色名","content":"对白内容"}],"choices":[{"text":"选项文本","action":"对应行动"}],"statChanges":{"属性名":-5},"newItems":[{"name":"物品名","description":"物品描述"}],"questUpdates":[{"questId":"任务ID","completed":false,"progress":"进度说明"}],"sceneChange":"新的场景描述","stateUpdates":{"playerLocation":"新地点","playerEmotion":"当前情绪","currentScene":"场景标识","world":{"time":"时间","weather":"天气","eventsAdd":["新增世界事件"]},"chapterAdvance":false},"relationshipUpdates":[{"characterId":"角色ID或空","characterName":"角色名","relationshipDelta":2,"mood":"情绪","state":"状态","location":"地点"}],"memoryFacts":[{"subject":"主体","subjectType":"player/character/location/item/quest/world","predicate":"关系","object":"客体","objectType":"character/location/item/quest/world/event","attributes":{"key":"value"}}],"visualCue":{"focus":"本回合画面焦点","camera":"远景/中景/近景等","mood":"画面氛围","onStageCharacters":["当前画面中最重要的角色"],"shouldChangeBackground":false},"gameOver":false,"gameOverMessage":"结束提示"}',
-            '要求：叙事连贯，选项有意义，角色性格保持一致，避免脱离已确认设定。stateUpdates、relationshipUpdates、memoryFacts 只填写本回合真正产生的新变化，没有就返回空对象或空数组。visualCue 用来描述画面焦点；只有场景底图确实应当明显变化时，shouldChangeBackground 才返回 true。'
+            '{"narration":"旁白描述","dialogues":[{"speaker":"角色名","content":"对白内容"}],"diceCheck":{"stat":"属性名","difficulty":15,"reason":"检定原因"},"choices":[{"text":"选项文本","action":"对应行动"}],"statChanges":{"属性名":-5},"newItems":[{"name":"物品名","description":"物品描述"}],"questUpdates":[{"questId":"任务ID","completed":false,"progress":"进度说明"}],"sceneChange":"新的场景描述","stateUpdates":{"playerLocation":"新地点","playerEmotion":"当前情绪","currentScene":"场景标识","world":{"time":"时间","weather":"天气","eventsAdd":["新增世界事件"]},"chapterAdvance":false},"relationshipUpdates":[{"characterId":"角色ID或空","characterName":"角色名","relationshipDelta":2,"mood":"情绪","state":"状态","location":"地点"}],"memoryFacts":[{"subject":"主体","subjectType":"player/character/location/item/quest/world","predicate":"关系","object":"客体","objectType":"character/location/item/quest/world/event","attributes":{"key":"value"}}],"visualCue":{"focus":"本回合画面焦点","camera":"远景/中景/近景等","mood":"画面氛围","onStageCharacters":["当前画面中最重要的角色"],"shouldChangeBackground":false},"gameOver":false,"gameOverMessage":"结束提示"}',
+            '要求：叙事连贯，选项有意义，角色性格保持一致，避免脱离已确认设定。diceCheck 只在有风险时返回。stateUpdates、relationshipUpdates、memoryFacts 只填写本回合真正产生的新变化，没有就返回空对象或空数组。visualCue 用来描述画面焦点；只有场景底图确实应当明显变化时，shouldChangeBackground 才返回 true。'
         ].join('\n\n');
     }
 
