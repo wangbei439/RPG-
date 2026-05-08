@@ -733,7 +733,7 @@ export function showChoices(choices = []) {
             if (!selected) {
                 return;
             }
-            await sendPlayerAction(selected.action || selected.text || '');
+            await sendPlayerAction(selected.text || selected.action || '');
         });
     });
 }
