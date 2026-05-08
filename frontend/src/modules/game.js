@@ -575,22 +575,49 @@ async function sendPlayerActionStreaming(action, imageConfig) {
                 const chunk = JSON.parse(line.slice(6));
 
                 if (chunk.type === 'narration') {
-                    // 流式显示旁白
+                    // 流式显示旁白 - 逐步累积文本
                     if (!narratorLogElement) {
                         narratorLogElement = appendLog('narrator', '');
                     }
                     currentNarration = chunk.text;
                     narratorLogElement.textContent = currentNarration;
+                    // 自动滚动到最新内容
+                    const log = document.getElementById('game-log');
+                    if (log) log.scrollTop = log.scrollHeight;
                 } else if (chunk.type === 'error') {
                     // Server-sent error during streaming
                     appendLog('system', `AI 生成失败：${chunk.message || '未知错误'}`);
                 } else if (chunk.type === 'complete') {
-                    // 完成
+                    // 完成后，如果有旁白，用打字机效果重新渲染
+                    if (currentNarration && narratorLogElement) {
+                        // 找到旁白条目，用打字机效果重放
+                        const logEntry = narratorLogElement.closest('.log-entry');
+                        if (logEntry) {
+                            narratorLogElement.textContent = '';
+                            typewriterEffect(narratorLogElement, currentNarration);
+                        }
+                    }
+
+                    // 渲染角色对话（独立气泡）
                     if (Array.isArray(chunk.gameState?.lastDialogues)) {
-                        chunk.gameState.lastDialogues.forEach((dialogue) => {
-                            if (!dialogue?.content) return;
-                            appendLog('narrator', dialogue.content, dialogue.speaker || '角色');
-                        });
+                        const dialogues = chunk.gameState.lastDialogues.filter(d => d?.content);
+                        if (dialogues.length > 0 && currentNarration) {
+                            // 有旁白+对话模式：延迟渲染对话
+                            const narrationLen = currentNarration.length;
+                            const baseDelay = Math.min(narrationLen * 28, 2000);
+                            dialogues.forEach((dialogue, index) => {
+                                setTimeout(() => {
+                                    appendLog('narrator', dialogue.content, dialogue.speaker || '角色');
+                                    const log = document.getElementById('game-log');
+                                    if (log) log.scrollTop = log.scrollHeight;
+                                }, baseDelay + index * 500);
+                            });
+                        } else {
+                            // 没有旁白，直接渲染对话
+                            dialogues.forEach((dialogue) => {
+                                appendLog('narrator', dialogue.content, dialogue.speaker || '角色');
+                            });
+                        }
                     }
 
                     if (chunk.gameOver && chunk.gameOverMessage) {
@@ -620,17 +647,17 @@ async function sendPlayerActionNormal(action, imageConfig) {
         })
     );
 
-    if (Array.isArray(result.gameState?.lastDialogues)) {
-        result.gameState.lastDialogues.forEach((dialogue) => {
-            if (!dialogue?.content) {
-                return;
-            }
-            appendLog('narrator', dialogue.content, dialogue.speaker || '角色');
-        });
-    }
+    // 用打字机效果渲染旁白
+    const dialogues = Array.isArray(result.gameState?.lastDialogues)
+        ? result.gameState.lastDialogues.filter(d => d?.content)
+        : [];
 
     if (result.response) {
-        appendLog('narrator', result.response);
+        renderNarrationWithDialogues(result.response, dialogues);
+    } else if (dialogues.length > 0) {
+        dialogues.forEach((dialogue) => {
+            appendLog('narrator', dialogue.content, dialogue.speaker || '角色');
+        });
     }
 
     if (result.gameOver && result.gameOverMessage) {
@@ -656,7 +683,13 @@ function appendLog(type, content, speaker = '') {
     }
 
     const entry = document.createElement('div');
-    entry.className = `log-entry ${type}`;
+
+    // 区分旁白、对话、玩家、系统等不同类型
+    if (type === 'narrator' && speaker && speaker !== '旁白' && speaker !== '系统') {
+        entry.className = 'log-entry dialogue';
+    } else {
+        entry.className = `log-entry ${type}`;
+    }
 
     if (speaker) {
         const speakerEl = document.createElement('div');
@@ -675,6 +708,132 @@ function appendLog(type, content, speaker = '') {
 
     // 返回 contentEl 以便流式更新
     return contentEl;
+}
+
+// ---------------------------------------------------------------------------
+// Typewriter effect for narration
+// ---------------------------------------------------------------------------
+
+/**
+ * 打字机效果：逐字显示文字，营造沉浸感
+ * @param {HTMLElement} element - 目标 DOM 元素
+ * @param {string} text - 要显示的完整文本
+ * @param {number} speed - 每个字符的显示间隔（毫秒）
+ * @returns {Object} 包含 cancel() 方法，可中途取消动画
+ */
+function typewriterEffect(element, text, speed = 28) {
+    let index = 0;
+    let cancelled = false;
+
+    // 如果文本太短或用户偏好减少动效，直接显示
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReducedMotion || text.length < 8) {
+        element.textContent = text;
+        return { cancel: () => {} };
+    }
+
+    element.textContent = '';
+    element.classList.add('typing');
+
+    function tick() {
+        if (cancelled) {
+            element.classList.remove('typing');
+            return;
+        }
+
+        if (index < text.length) {
+            // 每次添加1-3个字符，速度更自然
+            const chunkSize = Math.random() < 0.3 ? 2 : 1;
+            index += chunkSize;
+            element.textContent = text.slice(0, index);
+
+            // 标点处稍作停顿
+            const lastChar = text[index - 1];
+            const pauseChars = '。！？…—';
+            const shortPauseChars = '，、；：';
+            let delay = speed;
+            if (pauseChars.includes(lastChar)) {
+                delay = speed * 6;
+            } else if (shortPauseChars.includes(lastChar)) {
+                delay = speed * 3;
+            }
+
+            setTimeout(tick, delay);
+        } else {
+            // 打字完成，移除光标
+            element.textContent = text;
+            element.classList.remove('typing');
+        }
+    }
+
+    // 启动动画
+    requestAnimationFrame(tick);
+
+    return {
+        cancel: () => {
+            cancelled = true;
+            element.textContent = text;
+            element.classList.remove('typing');
+        }
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Render dialogues with distinct bubble style
+// ---------------------------------------------------------------------------
+
+/**
+ * 渲染对话：旁白用叙事风格，角色对话用气泡风格
+ */
+function renderNarrationWithDialogues(narration, dialogues = []) {
+    const log = document.getElementById('game-log');
+    if (!log) return;
+
+    // 先渲染旁白（带打字机效果）
+    if (narration) {
+        const narrationEntry = document.createElement('div');
+        narrationEntry.className = 'log-entry narrator';
+
+        const contentEl = document.createElement('div');
+        contentEl.className = 'content';
+        narrationEntry.appendChild(contentEl);
+
+        log.appendChild(narrationEntry);
+        typewriterEffect(contentEl, narration);
+    }
+
+    // 延迟渲染对话，等旁白打完一部分
+    if (Array.isArray(dialogues) && dialogues.length > 0) {
+        const narrationLength = narration ? narration.length : 0;
+        const baseDelay = Math.min(narrationLength * 28, 2000); // 最多等2秒
+
+        dialogues.forEach((dialogue, index) => {
+            if (!dialogue?.content) return;
+
+            setTimeout(() => {
+                const entry = document.createElement('div');
+                entry.className = 'log-entry dialogue';
+
+                const speakerEl = document.createElement('div');
+                speakerEl.className = 'speaker';
+                speakerEl.textContent = dialogue.speaker || '角色';
+                entry.appendChild(speakerEl);
+
+                const contentEl = document.createElement('div');
+                contentEl.className = 'content';
+                entry.appendChild(contentEl);
+
+                log.appendChild(entry);
+
+                // 对话用稍快的打字效果
+                typewriterEffect(contentEl, dialogue.content, 22);
+
+                log.scrollTop = log.scrollHeight;
+            }, baseDelay + index * 600);
+        });
+    }
+
+    log.scrollTop = log.scrollHeight;
 }
 
 // ---------------------------------------------------------------------------
@@ -1074,7 +1233,14 @@ export function renderGameState(gameState = state.gameState) {
 
     const log = document.getElementById('game-log');
     if (gameState.initialLog && !log.children.length) {
-        appendLog('narrator', gameState.initialLog);
+        // 开场旁白用打字机效果
+        const narrationEntry = document.createElement('div');
+        narrationEntry.className = 'log-entry narrator';
+        const contentEl = document.createElement('div');
+        contentEl.className = 'content';
+        narrationEntry.appendChild(contentEl);
+        log.appendChild(narrationEntry);
+        typewriterEffect(contentEl, gameState.initialLog);
     }
 
     renderStats(gameState.player?.stats || {});

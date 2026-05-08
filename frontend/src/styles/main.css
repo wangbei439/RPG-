@@ -58,6 +58,31 @@ body {
     to { transform: rotate(360deg); }
 }
 
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+
+@keyframes slideInLeft {
+    from { opacity: 0; transform: translateX(-20px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInRight {
+    from { opacity: 0; transform: translateX(20px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scaleIn {
+    from { opacity: 0; transform: scale(0.9); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
 /* Main Header */
 .main-header {
     text-align: center;
@@ -1108,6 +1133,36 @@ body {
 .scene-image .placeholder {
     color: var(--text-muted);
     font-size: 0.875rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.scene-image .placeholder::before {
+    content: '';
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary-dark), var(--primary-light));
+    opacity: 0.3;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+/* 场景图片加载中的闪光效果 */
+.scene-image.loading::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(99, 102, 241, 0.08) 50%,
+        transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite;
+    border-radius: var(--radius-sm);
 }
 
 .scene-description {
@@ -1285,21 +1340,62 @@ body {
 }
 
 .log-entry.narrator {
-    background: var(--bg-card);
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(99, 102, 241, 0.02));
     border-left: 3px solid var(--primary);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.log-entry.narrator .content {
+    color: var(--text-primary);
+    line-height: 1.8;
+    letter-spacing: 0.01em;
+    font-size: 0.95rem;
+}
+
+/* 对话气泡样式 - 区分旁白与角色说话 */
+.log-entry.dialogue {
+    background: linear-gradient(135deg, rgba(236, 72, 153, 0.1), rgba(236, 72, 153, 0.03));
+    border-left: 3px solid var(--secondary);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    margin-left: 1rem;
+    position: relative;
+}
+
+.log-entry.dialogue .speaker {
+    font-weight: 700;
+    color: var(--secondary);
+    margin-bottom: 0.35rem;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.log-entry.dialogue .content {
+    color: #e2e8f0;
+    line-height: 1.7;
+    font-style: italic;
+    padding-left: 0.5rem;
+    border-left: 2px solid rgba(236, 72, 153, 0.3);
 }
 
 .log-entry.player {
-    background: rgba(99, 102, 241, 0.1);
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.03));
     border-left: 3px solid var(--accent);
     margin-left: 2rem;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.log-entry.player .content {
+    color: #fbbf24;
+    font-weight: 500;
 }
 
 .log-entry.system {
-    background: rgba(34, 197, 94, 0.1);
+    background: rgba(34, 197, 94, 0.08);
     border-left: 3px solid var(--success);
     text-align: center;
     font-style: italic;
+    border-radius: var(--radius-sm);
 }
 
 .log-entry .speaker {
@@ -1311,6 +1407,16 @@ body {
 .log-entry .content {
     color: var(--text-secondary);
     line-height: 1.5;
+}
+
+/* 打字机光标效果 */
+.log-entry.narrator .content.typing::after,
+.log-entry.dialogue .content.typing::after {
+    content: '▌';
+    color: var(--primary-light);
+    animation: blink 0.8s infinite;
+    margin-left: 2px;
+    font-style: normal;
 }
 
 .input-area {
@@ -1341,18 +1447,47 @@ body {
     width: 100%;
     padding: 0.75rem 1rem;
     margin-bottom: 0.5rem;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(99, 102, 241, 0.02));
+    border: 1px solid rgba(99, 102, 241, 0.3);
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     text-align: left;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.25s ease;
+    animation: scaleIn 0.3s ease both;
+    position: relative;
+    overflow: hidden;
+}
+
+.choice-btn:nth-child(1) { animation-delay: 0s; }
+.choice-btn:nth-child(2) { animation-delay: 0.08s; }
+.choice-btn:nth-child(3) { animation-delay: 0.16s; }
+.choice-btn:nth-child(4) { animation-delay: 0.24s; }
+.choice-btn:nth-child(5) { animation-delay: 0.32s; }
+
+.choice-btn::before {
+    content: '▸';
+    color: var(--primary-light);
+    margin-right: 0.5rem;
+    font-size: 0.8rem;
+    opacity: 0.6;
+    transition: all 0.25s ease;
 }
 
 .choice-btn:hover {
-    background: var(--primary-dark);
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(99, 102, 241, 0.08));
     border-color: var(--primary);
+    transform: translateX(4px);
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.2);
+}
+
+.choice-btn:hover::before {
+    opacity: 1;
+    transform: translateX(2px);
+}
+
+.choice-btn:active {
+    transform: translateX(2px) scale(0.98);
 }
 
 .player-input {
