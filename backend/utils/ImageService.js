@@ -2,6 +2,9 @@ const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const OPTIONS_CACHE_TTL = 30 * 1000;
 const DEFAULT_NEGATIVE_PROMPT = 'low quality, blurry, deformed, ugly, bad anatomy, watermark, text';
 const PLACEHOLDER_PATTERN = /{{\s*([a-zA-Z0-9_]+)\s*}}/g;
+const { execFile } = require('child_process');
+const path = require('path');
+const fs = require('fs');
 
 class ImageService {
     constructor() {
@@ -16,6 +19,8 @@ class ImageService {
                 return this.generateWithComfyUI(prompt, config);
             case 'api':
                 return this.generateWithAPI(prompt, config);
+            case 'zai':
+                return this.generateWithZAI(prompt, config);
             default:
                 return null;
         }
@@ -27,6 +32,10 @@ class ImageService {
                 return this.generateWithComfyUIImages(prompt, config);
             case 'api': {
                 const image = await this.generateWithAPI(prompt, config);
+                return image ? [image] : [];
+            }
+            case 'zai': {
+                const image = await this.generateWithZAI(prompt, config);
                 return image ? [image] : [];
             }
             default:
@@ -985,6 +994,124 @@ class ImageService {
             console.error('Image API error:', error);
             throw error;
         }
+    }
+
+    /**
+     * 使用 z-ai-generate CLI 生成场景图
+     * 内置 AI 图片生成，无需外部 ComfyUI 或 API Key
+     */
+    async generateWithZAI(prompt, config = {}) {
+        const size = config.zaiImageSize || '1344x768'; // 默认宽屏，适合游戏场景
+        const outputDir = path.join(__dirname, '..', 'public', 'scene-images');
+
+        // 确保输出目录存在
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+        }
+
+        const filename = `scene_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`;
+        const outputPath = path.join(outputDir, filename);
+
+        // 增强提示词：加入 RPG 场景风格描述
+        const enhancedPrompt = this.buildZAIPrompt(prompt, config);
+
+        return new Promise((resolve, reject) => {
+            const args = [
+                '--prompt', enhancedPrompt,
+                '--output', outputPath,
+                '--size', size
+            ];
+
+            console.log('[ZAI Image] Generating:', enhancedPrompt.slice(0, 100));
+
+            execFile('z-ai-generate', args, { timeout: 120000 }, (error, stdout, stderr) => {
+                if (error) {
+                    console.error('[ZAI Image] Generation failed:', error.message);
+                    reject(new Error(`AI 图片生成失败: ${error.message}`));
+                    return;
+                }
+
+                // 检查文件是否生成
+                if (!fs.existsSync(outputPath)) {
+                    reject(new Error('AI 图片生成失败: 输出文件不存在'));
+                    return;
+                }
+
+                // 返回可访问的 URL 路径
+                const imageUrl = `/scene-images/${filename}`;
+                console.log('[ZAI Image] Generated:', imageUrl);
+                resolve(imageUrl);
+            });
+        });
+    }
+
+    /**
+     * 构建 z-ai-generate 的优化提示词
+     */
+    buildZAIPrompt(rawPrompt, config = {}) {
+        const parts = [];
+
+        // 艺术风格
+        const style = config.artStyle || 'fantasy';
+        const styleMap = {
+            fantasy: 'fantasy RPG game art, magical atmosphere, rich colors, detailed illustration',
+            scifi: 'sci-fi RPG game art, futuristic atmosphere, neon lights, cinematic',
+            mystery: 'dark noir RPG game art, moody lighting, mysterious atmosphere, shadows',
+            cultivation: 'Chinese ink wash painting style, xianxia RPG, ethereal mountains, flowing robes',
+            romance: 'soft romantic RPG art, warm lighting, beautiful characters, pastel colors',
+            survival: 'harsh survival RPG art, desolate landscape, dramatic lighting, gritty',
+            kingdom: 'medieval RPG art, castle architecture, heraldic banners, epic scale',
+            dungeon: 'dark dungeon RPG art, torchlight, stone corridors, ominous shadows',
+            adventure: 'adventure RPG art, lush landscapes, heroic composition, vibrant',
+            custom: 'RPG game scene illustration, detailed, atmospheric, dramatic lighting'
+        };
+        parts.push(styleMap[style] || styleMap.custom);
+
+        // 场景描述
+        if (rawPrompt) {
+            parts.push(rawPrompt);
+        }
+
+        // 时间/天气/情绪氛围
+        if (config.timeOfDay) {
+            const timeMap = {
+                '白天': 'daytime, bright natural lighting',
+                '夜晚': 'nighttime, moonlight, stars',
+                '黄昏': 'golden hour, sunset, warm orange light',
+                '黎明': 'dawn, soft pink and blue light',
+                '上午': 'morning light, gentle sun rays',
+                '下午': 'afternoon light, warm tones'
+            };
+            parts.push(timeMap[config.timeOfDay] || config.timeOfDay);
+        }
+
+        if (config.weather) {
+            const weatherMap = {
+                '晴朗': 'clear sky',
+                '雨天': 'rain, wet surfaces, reflections',
+                '雪天': 'snow, cold atmosphere, white landscape',
+                '暴风雨': 'storm, dramatic clouds, lightning',
+                '雾天': 'fog, mist, mysterious atmosphere'
+            };
+            parts.push(weatherMap[config.weather] || config.weather);
+        }
+
+        if (config.mood) {
+            const moodMap = {
+                '平静': 'peaceful, serene',
+                '紧张': 'tense, suspenseful',
+                '恐惧': 'frightening, horror',
+                '欢乐': 'joyful, festive',
+                '悲伤': 'melancholic, sorrowful',
+                '愤怒': 'intense, aggressive'
+            };
+            parts.push(moodMap[config.mood] || config.mood);
+        }
+
+        // 质量标签
+        parts.push('high quality, detailed, 4K');
+
+        return parts.filter(Boolean).join(', ');
     }
 }
 

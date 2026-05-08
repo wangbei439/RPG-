@@ -150,6 +150,7 @@
                 <div class="form-group image-config" id="image-config">
                     <label for="image-source">图像来源</label>
                     <select id="image-source">
+                        <option value="zai">AI 内置生成（推荐）</option>
                         <option value="comfyui">ComfyUI（本地）</option>
                         <option value="api">接口服务</option>
                         <option value="none">不使用图像</option>
@@ -392,6 +393,9 @@
             <div id="mobile-game-log" class="mobile-game-log"></div>
 
             <div class="game-layout">
+                <!-- 氛围滤镜叠加层 -->
+                <div id="atmosphere-overlay" class="atmosphere-overlay"></div>
+
                 <!-- 左侧：场景图像 -->
                 <div class="scene-panel" id="scene-panel">
                     <button id="scene-toggle-btn" class="scene-toggle-btn" type="button">▼ 收起场景图</button>
@@ -408,7 +412,7 @@
                             </label>
                             <button id="generate-scene-image-btn" type="button" class="action-btn primary">生成场景图</button>
                         </div>
-                        <div id="scene-image-status" class="helper-text">当前为手动生图模式，点击按钮后才会调用 ComfyUI。</div>
+                        <div id="scene-image-status" class="helper-text">当前为 AI 内置生成模式，场景变化时自动生成图片。</div>
                         <div id="scene-image-gallery" class="scene-gallery"></div>
                     </div>
                     <div id="scene-description" class="scene-description"></div>

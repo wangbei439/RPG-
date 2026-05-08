@@ -277,7 +277,12 @@ module.exports = function({
                     } else if (imagePrompt) {
                         const sceneImage = await imageService.generateImage(imagePrompt, {
                             ...effectiveImageConfig,
-                            comfyuiSeed: runtimeImage.seed ?? effectiveImageConfig.comfyuiSeed
+                            comfyuiSeed: runtimeImage.seed ?? effectiveImageConfig.comfyuiSeed,
+                            // 传递视觉状态信息给 ZAI 图片生成
+                            artStyle: effectiveImageConfig.artStyle || game.data?.type || 'fantasy',
+                            timeOfDay: visualState.timeOfDay || '',
+                            weather: visualState.weather || '',
+                            mood: visualState.mood || ''
                         });
                         if (sceneImage) {
                             sceneImageCache.set(cacheKey, sceneImage);

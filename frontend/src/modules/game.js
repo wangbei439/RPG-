@@ -1364,6 +1364,74 @@ function scheduleRuntimeSnapshotPersist() {
 }
 
 // ---------------------------------------------------------------------------
+// Atmosphere overlay system
+// ---------------------------------------------------------------------------
+
+/**
+ * 根据游戏状态更新氛围滤镜
+ * 天气、时间、情绪 → CSS 叠加层
+ */
+function updateAtmosphere(gameState) {
+    const overlay = document.getElementById('atmosphere-overlay');
+    if (!overlay) return;
+
+    const visualState = gameState.visualState || {};
+    const timeOfDay = visualState.timeOfDay || '';
+    const weather = visualState.weather || '';
+    const mood = visualState.mood || gameState.player?.emotion || '';
+
+    // 清除所有氛围 class
+    overlay.className = 'atmosphere-overlay';
+
+    // 根据时间添加氛围
+    const timeClassMap = {
+        '夜晚': 'night',
+        '深夜': 'night',
+        '黄昏': 'dusk',
+        '傍晚': 'dusk',
+        '黎明': 'dusk'
+    };
+    if (timeClassMap[timeOfDay]) {
+        overlay.classList.add(timeClassMap[timeOfDay]);
+    }
+
+    // 根据天气添加氛围
+    const weatherClassMap = {
+        '雨天': 'rain',
+        '小雨': 'rain',
+        '大雨': 'rain',
+        '暴风雨': 'storm',
+        '雷暴': 'storm',
+        '雪天': 'snow',
+        '大雪': 'snow',
+        '小雪': 'snow',
+        '雾天': 'fog',
+        '大雾': 'fog',
+        '浓雾': 'fog'
+    };
+    if (weatherClassMap[weather]) {
+        overlay.classList.add(weatherClassMap[weather]);
+    }
+
+    // 根据情绪添加氛围
+    const moodClassMap = {
+        '紧张': 'tense',
+        '恐惧': 'horror',
+        '害怕': 'horror',
+        '惊恐': 'horror',
+        '愤怒': 'tense'
+    };
+    if (moodClassMap[mood]) {
+        overlay.classList.add(moodClassMap[mood]);
+    }
+
+    // 如果有任何氛围 class，激活叠加层
+    if (overlay.classList.length > 1) {
+        overlay.classList.add('active');
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Render game state
 // ---------------------------------------------------------------------------
 
@@ -1395,6 +1463,9 @@ export function renderGameState(gameState = state.gameState) {
     renderCharacterRelations(gameState.characterStates || []);
     syncSceneImageControls();
     scheduleRuntimeSnapshotPersist();
+
+    // 更新氛围滤镜
+    updateAtmosphere(gameState);
 
     // Start auto-save timer when in game
     startAutoSaveTimer();
