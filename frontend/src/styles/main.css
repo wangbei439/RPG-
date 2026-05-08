@@ -1413,21 +1413,18 @@ body {
 
 /* Game Main */
 .game-main {
-    grid-area: visual / visual / controls / controls;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow: hidden;
+    display: contents;
 }
 
 .scene-story-panel {
-    flex-shrink: 0;
+    grid-column: 1;
+    grid-row: 1;
     background: var(--bg-card);
     padding: 1rem;
     overflow-y: auto;
+    border-right: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
-    min-height: 100px;
-    max-height: 180px;
+    min-height: 180px;
 }
 
 .scene-story-panel h3 {
@@ -1442,8 +1439,10 @@ body {
 }
 
 .game-log {
-    flex: 1 1 0;
+    grid-column: 1;
+    grid-row: 2;
     background: var(--bg-card);
+    border-right: 1px solid var(--border);
     padding: 1rem;
     overflow-y: auto;
     min-height: 0;
@@ -1660,13 +1659,13 @@ body {
 }
 
 .input-area {
-    flex-shrink: 0;
+    grid-area: controls;
     border-top: 1px solid var(--border);
     padding: 1rem 1.5rem 1.25rem;
     background: linear-gradient(180deg, rgba(15, 23, 42, 0.85), rgba(15, 23, 42, 0.98));
     display: flex;
     flex-direction: column;
-    max-height: 45vh;
+    min-height: 0;
     overflow: hidden;
 }
 
@@ -2067,16 +2066,13 @@ body {
         height: calc(100dvh - 60px);
     }
 
-    .game-main {
-        grid-area: visual / visual / controls / controls;
-    }
-
     .scene-story-panel,
     .game-log {
         display: none;
     }
 
     .scene-panel,
+    .input-area,
     .status-panel {
         grid-column: 1;
         border: none;
