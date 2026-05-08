@@ -13,6 +13,7 @@
             <div class="config-bar">
                 <button id="settings-btn" class="icon-btn" title="设置">⚙️</button>
                 <button id="load-saved-games-btn" class="icon-btn" title="读取存档">📂 读取存档</button>
+                <button id="templates-btn" class="icon-btn" title="游戏模板">🎯 模板</button>
             </div>
 
             <!-- Hero 区域 -->
@@ -33,6 +34,18 @@
                     <!-- 示例游戏卡片将在这里动态生成 -->
                 </div>
                 <button id="close-examples" class="btn-text">返回首页</button>
+            </div>
+
+            <!-- 模板区域 -->
+            <div id="templates-section" class="templates-section" style="display: none;">
+                <h2 class="section-title">🎯 游戏模板</h2>
+                <div id="templates-grid" class="templates-grid">
+                    <!-- Dynamic template cards -->
+                </div>
+                <div class="template-actions">
+                    <button id="save-template-btn" class="btn-secondary">💾 保存当前配置为模板</button>
+                    <button id="close-templates" class="btn-text">返回首页</button>
+                </div>
             </div>
 
             <!-- 存档列表区域（默认隐藏） -->
@@ -529,6 +542,7 @@
                     <button class="menu-item" id="load-game">📂 加载游戏</button>
                     <button class="menu-item" id="restart-game">🔄 重新开始</button>
                     <button class="menu-item" id="export-game">📤 导出游戏</button>
+                    <button class="menu-item" id="show-achievements">🏆 成就</button>
                     <div class="autosave-toggle" id="autosave-toggle" role="button" tabindex="0" aria-label="自动保存开关">
                         <span>🔄 自动保存</span>
                         <div id="autosave-toggle-switch" class="autosave-toggle-switch active"></div>
@@ -537,6 +551,48 @@
             </div>
         </div>
     </div>
+
+        <!-- 成就面板模态框 -->
+        <div id="achievement-modal" class="modal">
+            <div class="modal-content achievement-modal-content">
+                <div class="modal-header">
+                    <h2>🏆 成就</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="achievement-stats">
+                        <span id="achievement-count">0/15 已解锁</span>
+                    </div>
+                    <div id="achievement-list" class="achievement-list">
+                        <!-- Dynamic achievement cards -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 游戏回顾模态框 -->
+        <div id="game-review-modal" class="modal">
+            <div class="modal-content review-modal-content">
+                <div class="modal-header">
+                    <h2>📖 冒险回顾</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="review-stars" class="review-stars"></div>
+                    <div id="review-summary" class="review-summary"></div>
+                    <h3>🔑 关键抉择</h3>
+                    <div id="review-choices" class="review-choices"></div>
+                    <h3>👥 角色结局</h3>
+                    <div id="review-endings" class="review-endings"></div>
+                    <div class="review-stats" id="review-stats"></div>
+                    <div class="review-actions">
+                        <button id="review-share-btn" class="action-btn primary">📤 分享故事</button>
+                        <button id="review-new-game-btn" class="action-btn secondary">🔄 再来一局</button>
+                        <button id="review-download-btn" class="action-btn secondary">📥 下载故事</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
     <!-- Toast notification container -->
     <div id="toast-container"></div>

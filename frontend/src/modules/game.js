@@ -631,6 +631,17 @@ async function sendPlayerActionStreaming(action, imageConfig) {
                     if (chunk.diceCheck) {
                         showDiceCheckResult(chunk.diceCheck);
                     }
+
+                    // Check achievements after action
+                    if (chunk.gameState) {
+                        import('./phase4.js').then(m => m.checkAchievements(chunk.gameState)).catch(() => {});
+                    }
+
+                    // Show game review on game over
+                    if (chunk.gameOver) {
+                        const gs = chunk.gameState || state.gameState;
+                        import('./phase4.js').then(m => m.showGameReview(state.currentGameId, gs)).catch(() => {});
+                    }
                 }
             } catch (e) {
                 console.error('解析流式数据失败:', e);
@@ -672,6 +683,17 @@ async function sendPlayerActionNormal(action, imageConfig) {
     // 显示骰子检定结果
     if (result.diceCheck) {
         showDiceCheckResult(result.diceCheck);
+    }
+
+    // Check achievements after action
+    if (result.gameState) {
+        import('./phase4.js').then(m => m.checkAchievements(result.gameState)).catch(() => {});
+    }
+
+    // Show game review on game over
+    if (result.gameOver) {
+        const gs = result.gameState || state.gameState;
+        import('./phase4.js').then(m => m.showGameReview(state.currentGameId, gs)).catch(() => {});
     }
 
     showChoices(result.choices || []);

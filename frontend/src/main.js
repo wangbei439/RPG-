@@ -34,6 +34,9 @@ import { initWorkbench } from './modules/workbench.js';
 // Game screen
 import { initGameScreen } from './modules/game.js';
 
+// Phase 4 – Achievements, Review, Share, Templates
+import { initPhase4 } from './modules/phase4.js';
+
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
@@ -48,5 +51,6 @@ document.addEventListener('DOMContentLoaded', () => {
     initWorkbench();
     initGameScreen();
     initHeroSection();
+    initPhase4();
     loadSettings();
 });

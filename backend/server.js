@@ -35,6 +35,7 @@ const createComfyuiRoutes = require('./routes/comfyuiRoutes');
 const createSystemRoutes = require('./routes/systemRoutes');
 const createAuthRoutes = require('./routes/authRoutes');
 const createSettingsRoutes = require('./routes/settingsRoutes');
+const createPhase4Routes = require('./routes/phase4Routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -174,6 +175,7 @@ app.use('/api', createGenerateRoutes(dependencies));
 app.use('/api/settings', createSettingsRoutes({ db }));
 app.use('/api', createComfyuiRoutes(dependencies));
 app.use('/api', createSystemRoutes(dependencies));
+app.use('/api', createPhase4Routes(dependencies));
 app.use('/api', createProjectRoutes(dependencies));  // /:projectId is greedy, must be last
 
 // Global error handler (must be after all routes)

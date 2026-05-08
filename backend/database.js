@@ -664,6 +664,89 @@ const MIGRATIONS = [
                 CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key);
             `);
         }
+    },
+    {
+        version: 2,
+        description: 'Add Phase 4 tables: achievements, player_achievements, game_reviews, game_templates',
+        up: () => {
+            const database = getDb();
+            database.exec(`
+                CREATE TABLE IF NOT EXISTS achievements (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    icon TEXT NOT NULL DEFAULT '🏆',
+                    category TEXT NOT NULL DEFAULT 'general',
+                    rarity TEXT NOT NULL DEFAULT 'common',
+                    condition_json TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS player_achievements (
+                    achievement_id TEXT NOT NULL,
+                    game_id TEXT NOT NULL,
+                    unlocked_at INTEGER NOT NULL,
+                    PRIMARY KEY (achievement_id, game_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS game_reviews (
+                    game_id TEXT PRIMARY KEY,
+                    rating INTEGER NOT NULL,
+                    summary TEXT,
+                    key_choices TEXT,
+                    character_endings TEXT,
+                    play_duration INTEGER DEFAULT 0,
+                    turn_count INTEGER DEFAULT 0,
+                    created_at INTEGER NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS game_templates (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    game_type TEXT NOT NULL DEFAULT 'custom',
+                    config_json TEXT NOT NULL,
+                    cover_icon TEXT DEFAULT '🎮',
+                    is_public INTEGER DEFAULT 0,
+                    use_count INTEGER DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_player_achievements_game ON player_achievements(game_id);
+                CREATE INDEX IF NOT EXISTS idx_game_templates_public ON game_templates(is_public);
+            `);
+
+            // Seed default achievements if the table is empty
+            const ACHIEVEMENTS = [
+                { id: 'first_step', name: '初出茅庐', description: '完成第一个游戏回合', icon: '👣', category: 'milestone', rarity: 'common', condition: { type: 'turns', min: 1 } },
+                { id: 'veteran', name: '老练冒险者', description: '在一个游戏中完成20个回合', icon: '⚔️', category: 'milestone', rarity: 'uncommon', condition: { type: 'turns', min: 20 } },
+                { id: 'epic_journey', name: '史诗之旅', description: '在一个游戏中完成50个回合', icon: '🏔️', category: 'milestone', rarity: 'rare', condition: { type: 'turns', min: 50 } },
+                { id: 'collector', name: '收藏家', description: '同时拥有10件以上物品', icon: '🎒', category: 'inventory', rarity: 'uncommon', condition: { type: 'inventory_count', min: 10 } },
+                { id: 'hoarder', name: '仓鼠囤积者', description: '同时拥有20件以上物品', icon: '🗃️', category: 'inventory', rarity: 'rare', condition: { type: 'inventory_count', min: 20 } },
+                { id: 'social_butterfly', name: '社交达人', description: '与5个以上角色建立友好关系', icon: '🦋', category: 'social', rarity: 'uncommon', condition: { type: 'allies', min: 5 } },
+                { id: 'lone_wolf', name: '独狼', description: '所有角色关系值低于0', icon: '🐺', category: 'social', rarity: 'rare', condition: { type: 'all_hostile' } },
+                { id: 'dice_lucky', name: '幸运骰子', description: '连续3次检定成功', icon: '🍀', category: 'dice', rarity: 'uncommon', condition: { type: 'consecutive_dice_success', min: 3 } },
+                { id: 'dice_cursed', name: '命运之弃', description: '连续3次检定失败', icon: '💀', category: 'dice', rarity: 'uncommon', condition: { type: 'consecutive_dice_failure', min: 3 } },
+                { id: 'critical_hit', name: '大成功！', description: '掷出自然20', icon: '⭐', category: 'dice', rarity: 'uncommon', condition: { type: 'natural_20' } },
+                { id: 'critical_fail', name: '大失败！', description: '掷出自然1', icon: '💥', category: 'dice', rarity: 'uncommon', condition: { type: 'natural_1' } },
+                { id: 'quest_master', name: '任务大师', description: '完成5个以上任务', icon: '📋', category: 'quest', rarity: 'uncommon', condition: { type: 'quests_completed', min: 5 } },
+                { id: 'survivor', name: '幸存者', description: '生命值低于10%时继续游戏', icon: '❤️‍🔥', category: 'milestone', rarity: 'rare', condition: { type: 'low_hp_survive' } },
+                { id: 'game_master', name: '游戏大师', description: '完成10场游戏', icon: '👑', category: 'milestone', rarity: 'epic', condition: { type: 'games_completed', min: 10 } },
+                { id: 'explorer', name: '探索者', description: '尝试5种不同游戏类型', icon: '🗺️', category: 'milestone', rarity: 'uncommon', condition: { type: 'game_types', min: 5 } },
+            ];
+
+            const existing = database.prepare('SELECT COUNT(*) as count FROM achievements').get();
+            if (existing.count === 0) {
+                const insert = database.prepare(`
+                    INSERT INTO achievements (id, name, description, icon, category, rarity, condition_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                `);
+                for (const a of ACHIEVEMENTS) {
+                    insert.run(a.id, a.name, a.description, a.icon, a.category, a.rarity, JSON.stringify(a.condition));
+                }
+                console.log(`[Database] Seeded ${ACHIEVEMENTS.length} default achievements`);
+            }
+        }
     }
 ];
 
