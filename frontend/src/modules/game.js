@@ -337,6 +337,15 @@ export function initGameScreen() {
         btn.textContent = isCollapsed ? '▶ 展开场景图' : '▼ 收起场景图';
     });
 
+    // Scene image controls expand/collapse
+    document.getElementById('scene-expand-controls-btn')?.addEventListener('click', () => {
+        const panel = document.getElementById('scene-panel');
+        const btn = document.getElementById('scene-expand-controls-btn');
+        if (!panel || !btn) return;
+        const isExpanded = panel.classList.toggle('controls-expanded');
+        btn.textContent = isExpanded ? '✕ 收起设置' : '⚙️ 生图设置';
+    });
+
     // Swipe back gesture support
     initSwipeBack();
 
@@ -1466,6 +1475,12 @@ export function renderGameState(gameState = state.gameState) {
     state.currentVisualSignature = gameState.visualState?.signature || state.currentVisualSignature;
     document.getElementById('game-title').textContent = gameState.name || 'AI 生成 RPG';
     document.getElementById('scene-description').textContent = gameState.sceneDescription || '';
+
+    // 同步场景描述到左侧场景描述面板
+    const storyCopy = document.getElementById('scene-story-copy');
+    if (storyCopy) {
+        storyCopy.textContent = gameState.sceneDescription || '';
+    }
 
     const log = document.getElementById('game-log');
     if (gameState.initialLog && !log.children.length) {
