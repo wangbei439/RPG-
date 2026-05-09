@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>叙游工坊 - AI一键生成角色扮演游戏</title>
-  <script type="module" crossorigin src="/assets/index-BenlCSWm.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-msL6Wsv4.css">
+  <script type="module" crossorigin src="/assets/index-BT-z22Oj.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-SAye9AjU.css">
 </head>
 <body>
     <div id="app">
@@ -51,7 +51,14 @@
 
             <!-- 存档列表区域（默认隐藏） -->
             <div id="saved-games-section" class="saved-games-section" style="display: none;">
-                <h2>📂 已保存的游戏</h2>
+                <div class="saved-games-header">
+                    <h2>📂 已保存的游戏</h2>
+                    <div class="saved-games-actions">
+                        <button id="toggle-select-mode-btn" class="btn-text" type="button">批量管理</button>
+                        <button id="select-all-saves-btn" class="btn-text" type="button" style="display:none">全选</button>
+                        <button id="batch-delete-saves-btn" class="btn-secondary" type="button" style="display:none">🗑️ 删除选中</button>
+                    </div>
+                </div>
                 <div id="saved-games-list" class="saved-games-list">
                     <!-- 存档列表将在这里动态生成 -->
                 </div>
@@ -171,6 +178,57 @@
                         <option value="api">接口服务</option>
                         <option value="none">不使用图像</option>
                     </select>
+
+                    <div id="pollinations-settings" class="sub-config" style="display:none">
+                        <div class="sub-config-grid">
+                            <div>
+                                <label for="pollinations-model">Pollinations 模型</label>
+                                <select id="pollinations-model" data-generation-setting="true">
+                                    <option value="flux">Flux（推荐）</option>
+                                    <option value="flux-realism">Flux Realism（写实）</option>
+                                    <option value="flux-anime">Flux Anime（动漫）</option>
+                                    <option value="flux-3d">Flux 3D（立体）</option>
+                                    <option value="flux-cablyai">Flux CablyAI</option>
+                                    <option value="turbo">Turbo（快速）</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="pollinations-width">宽度</label>
+                                <input type="number" id="pollinations-width" data-generation-setting="true" value="1440" min="256" max="2048" step="64" />
+                            </div>
+                            <div>
+                                <label for="pollinations-height">高度</label>
+                                <input type="number" id="pollinations-height" data-generation-setting="true" value="720" min="256" max="2048" step="64" />
+                            </div>
+                            <div>
+                                <label for="pollinations-seed">随机种子（-1=随机）</label>
+                                <input type="number" id="pollinations-seed" data-generation-setting="true" value="-1" />
+                            </div>
+                        </div>
+                        <div class="helper-text">Pollinations 完全免费，无需 API Key，直接可用。模型越大生成越慢但效果越好。</div>
+                    </div>
+
+                    <div id="puter-settings" class="sub-config" style="display:none">
+                        <div class="sub-config-grid">
+                            <div>
+                                <label for="puter-model">Puter 模型</label>
+                                <select id="puter-model" data-generation-setting="true">
+                                    <option value="gpt-image-1">GPT Image 1（推荐）</option>
+                                    <option value="dall-e-3">DALL-E 3</option>
+                                    <option value="flux">Flux</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="puter-width">宽度</label>
+                                <input type="number" id="puter-width" data-generation-setting="true" value="1440" min="256" max="2048" step="64" />
+                            </div>
+                            <div>
+                                <label for="puter-height">高度</label>
+                                <input type="number" id="puter-height" data-generation-setting="true" value="720" min="256" max="2048" step="64" />
+                            </div>
+                        </div>
+                        <div class="helper-text">Puter.js 完全免费，无需 API Key。通过浏览器端 SDK 直接调用，图片在前端生成后上传到服务器。</div>
+                    </div>
 
                     <div id="comfyui-settings" class="sub-config">
                         <input type="text" id="comfyui-url" placeholder="ComfyUI地址 (默认: http://127.0.0.1:8188)" value="http://127.0.0.1:8188" />

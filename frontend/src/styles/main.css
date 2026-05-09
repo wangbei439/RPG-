@@ -344,11 +344,51 @@ body {
     animation: fadeIn 0.3s ease;
 }
 
-.saved-games-section h2 {
-    text-align: center;
+.saved-games-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 1.5rem;
+}
+
+.saved-games-header h2 {
+    text-align: left;
+    margin: 0;
     font-size: 1.5rem;
     color: var(--text-primary);
+}
+
+.saved-games-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.saved-games-actions .btn-text {
+    background: none;
+    border: none;
+    color: var(--primary);
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 0.4rem 0.8rem;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.saved-games-actions .btn-text:hover {
+    background: var(--bg-hover, rgba(255,255,255,0.08));
+}
+
+.saved-games-actions .btn-secondary {
+    display: inline-block;
+    width: auto;
+    font-size: 0.9rem;
+    padding: 0.4rem 0.8rem;
+}
+
+.saved-games-actions .btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .saved-games-list {
@@ -365,12 +405,66 @@ body {
     padding: 1.25rem;
     cursor: pointer;
     transition: all 0.3s ease;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    position: relative;
 }
 
 .saved-game-card:hover {
     transform: translateY(-3px);
     border-color: var(--primary);
     box-shadow: var(--shadow-lg);
+}
+
+.saved-game-card.select-mode {
+    cursor: pointer;
+}
+
+.saved-game-card.selected {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.08);
+}
+
+.saved-game-checkbox {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    margin-top: 0.25rem;
+    cursor: pointer;
+    accent-color: var(--primary);
+}
+
+.saved-game-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.saved-game-delete-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border-radius: 50%;
+    font-size: 0.8rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s, background 0.2s;
+}
+
+.saved-game-card:hover .saved-game-delete-btn {
+    opacity: 1;
+}
+
+.saved-game-delete-btn:hover {
+    background: rgba(239, 68, 68, 0.25);
 }
 
 .saved-game-header {

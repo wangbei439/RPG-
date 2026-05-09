@@ -141,103 +141,226 @@ export function initializeLiveImageConfigPanel() {
         return;
     }
 
+    const currentSource = getEffectiveGenerationConfig().imageSource || 'zai';
+
     container.innerHTML = `
         <div class="live-image-config-card">
-            <div class="sub-config-row">
-                <select id="live-comfyui-model">
-                    <option value="">选择模型</option>
-                </select>
-                <select id="live-comfyui-workflow-file">
-                    <option value="">选择工作流文件</option>
-                </select>
-                <button type="button" id="live-load-workflow-btn" class="test-btn">载入工作流</button>
-            </div>
-            <div class="sub-config-row">
-                <button type="button" id="live-refresh-comfyui-btn" class="test-btn">刷新模型</button>
-                <button type="button" id="live-refresh-workflow-files-btn" class="test-btn">刷新工作流</button>
-                <button type="button" id="live-test-comfyui-btn" class="test-btn">测试 ComfyUI</button>
-            </div>
-            <details id="live-comfyui-settings">
-                <summary>ComfyUI 实时配置</summary>
-                <div class="sub-config-grid" style="margin-top:0.75rem">
-                    <div>
-                        <label for="live-comfyui-url">ComfyUI 地址</label>
-                        <input type="text" id="live-comfyui-url" value="http://127.0.0.1:8000" />
-                    </div>
-                    <div>
-                        <label for="live-comfyui-workflow-mode">工作流模式</label>
-                        <select id="live-comfyui-workflow-mode">
-                            <option value="custom">自定义工作流</option>
-                            <option value="default">默认模板</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label for="live-comfyui-sampler">采样器</label>
-                        <select id="live-comfyui-sampler">
-                            <option value="euler">euler</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label for="live-comfyui-scheduler">调度器</label>
-                        <select id="live-comfyui-scheduler">
-                            <option value="normal">标准</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label for="live-comfyui-width">宽度</label>
-                        <input type="number" id="live-comfyui-width" value="768" min="256" max="2048" step="64" />
-                    </div>
-                    <div>
-                        <label for="live-comfyui-height">高度</label>
-                        <input type="number" id="live-comfyui-height" value="512" min="256" max="2048" step="64" />
-                    </div>
-                    <div>
-                        <label for="live-comfyui-steps">采样步数</label>
-                        <input type="number" id="live-comfyui-steps" value="20" min="1" max="150" />
-                    </div>
-                    <div>
-                        <label for="live-comfyui-cfg">CFG</label>
-                        <input type="number" id="live-comfyui-cfg" value="7.5" min="0.1" max="30" step="0.1" />
-                    </div>
-                    <div>
-                        <label for="live-comfyui-seed">随机种子</label>
-                        <input type="number" id="live-comfyui-seed" value="-1" />
-                    </div>
-                    <div>
-                        <label for="live-comfyui-timeout-ms">超时时间（毫秒）</label>
-                        <input type="number" id="live-comfyui-timeout-ms" value="180000" min="5000" step="1000" />
-                    </div>
+            <div class="sub-config-grid" style="margin-bottom:0.75rem">
+                <div>
+                    <label for="live-image-source">图像来源</label>
+                    <select id="live-image-source">
+                        <option value="zai">AI 内置生成（推荐）</option>
+                        <option value="pollinations">Pollinations（免费无Key）</option>
+                        <option value="puter">Puter/Pollinations（免费无Key）</option>
+                        <option value="comfyui">ComfyUI（本地）</option>
+                        <option value="api">接口服务</option>
+                        <option value="none">不使用图像</option>
+                    </select>
                 </div>
+            </div>
+
+            <!-- ZAI 子面板 -->
+            <div id="live-zai-config" class="live-source-subpanel" style="display:none">
                 <div class="sub-config-grid">
                     <div>
-                        <label for="live-comfyui-prompt-prefix">正向前缀</label>
-                        <input type="text" id="live-comfyui-prompt-prefix" value="中文互动叙事场景" />
-                    </div>
-                    <div>
-                        <label for="live-comfyui-prompt-suffix">正向后缀</label>
-                        <input type="text" id="live-comfyui-prompt-suffix" value="高质量，细节丰富，电影感插画" />
-                    </div>
-                    <div>
-                        <label for="live-comfyui-negative-prompt">反向提示词</label>
-                        <input type="text" id="live-comfyui-negative-prompt" value="低质量，模糊，畸形，崩坏人体，水印，文字" />
-                    </div>
-                    <div>
-                        <label for="live-comfyui-filename-prefix">文件名前缀</label>
-                        <input type="text" id="live-comfyui-filename-prefix" value="rpg_scene" />
+                        <label for="live-zai-size">图片尺寸</label>
+                        <select id="live-zai-size">
+                            <option value="1440x720">1440x720（宽屏）</option>
+                            <option value="1152x864">1152x864（标准）</option>
+                            <option value="864x1152">864x1152（竖屏）</option>
+                            <option value="1024x1024">1024x1024（方形）</option>
+                        </select>
                     </div>
                 </div>
-                <div id="live-comfyui-custom-workflow" style="margin-top:0.75rem">
-                    <textarea id="live-comfyui-workflow-json" rows="8" placeholder="这里会载入自定义工作流 JSON。"></textarea>
-                    <div class="sub-config-actions">
-                        <button type="button" id="live-validate-workflow-btn" class="test-btn">校验工作流</button>
+                <div class="helper-text">AI 内置生成，无需额外配置，推荐使用。</div>
+            </div>
+
+            <!-- Pollinations 子面板 -->
+            <div id="live-pollinations-config" class="live-source-subpanel" style="display:none">
+                <div class="sub-config-grid">
+                    <div>
+                        <label for="live-pollinations-model">Pollinations 模型</label>
+                        <select id="live-pollinations-model">
+                            <option value="flux">Flux（推荐）</option>
+                            <option value="flux-realism">Flux Realism（写实）</option>
+                            <option value="flux-anime">Flux Anime（动漫）</option>
+                            <option value="flux-3d">Flux 3D（立体）</option>
+                            <option value="flux-cablyai">Flux CablyAI</option>
+                            <option value="turbo">Turbo（快速）</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="live-pollinations-width">宽度</label>
+                        <input type="number" id="live-pollinations-width" value="1440" min="256" max="2048" step="64" />
+                    </div>
+                    <div>
+                        <label for="live-pollinations-height">高度</label>
+                        <input type="number" id="live-pollinations-height" value="720" min="256" max="2048" step="64" />
+                    </div>
+                    <div>
+                        <label for="live-pollinations-seed">随机种子（-1=随机）</label>
+                        <input type="number" id="live-pollinations-seed" value="-1" />
                     </div>
                 </div>
-            </details>
-            <div id="live-comfyui-status" class="helper-text">当前在接口出图模式下会直接调用生成按钮。切换到 ComfyUI 后，可以在这里细调模型和工作流。</div>
+                <div class="helper-text">Pollinations 完全免费，无需 API Key，直接可用。</div>
+            </div>
+
+            <!-- Puter 子面板 -->
+            <div id="live-puter-config" class="live-source-subpanel" style="display:none">
+                <div class="sub-config-grid">
+                    <div>
+                        <label for="live-puter-model">Puter 模型</label>
+                        <select id="live-puter-model">
+                            <option value="gpt-image-1">GPT Image 1（推荐）</option>
+                            <option value="dall-e-3">DALL-E 3</option>
+                            <option value="flux">Flux</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="live-puter-width">宽度</label>
+                        <input type="number" id="live-puter-width" value="1440" min="256" max="2048" step="64" />
+                    </div>
+                    <div>
+                        <label for="live-puter-height">高度</label>
+                        <input type="number" id="live-puter-height" value="720" min="256" max="2048" step="64" />
+                    </div>
+                </div>
+                <div class="helper-text">Puter.js 完全免费，无需 API Key。后端自动降级使用 Pollinations 接口。</div>
+            </div>
+
+            <!-- ComfyUI 子面板 -->
+            <div id="live-comfyui-config" class="live-source-subpanel" style="display:none">
+                <div class="sub-config-row">
+                    <select id="live-comfyui-model">
+                        <option value="">选择模型</option>
+                    </select>
+                    <select id="live-comfyui-workflow-file">
+                        <option value="">选择工作流文件</option>
+                    </select>
+                    <button type="button" id="live-load-workflow-btn" class="test-btn">载入工作流</button>
+                </div>
+                <div class="sub-config-row">
+                    <button type="button" id="live-refresh-comfyui-btn" class="test-btn">刷新模型</button>
+                    <button type="button" id="live-refresh-workflow-files-btn" class="test-btn">刷新工作流</button>
+                    <button type="button" id="live-test-comfyui-btn" class="test-btn">测试 ComfyUI</button>
+                </div>
+                <details id="live-comfyui-settings">
+                    <summary>ComfyUI 实时配置</summary>
+                    <div class="sub-config-grid" style="margin-top:0.75rem">
+                        <div>
+                            <label for="live-comfyui-url">ComfyUI 地址</label>
+                            <input type="text" id="live-comfyui-url" value="http://127.0.0.1:8000" />
+                        </div>
+                        <div>
+                            <label for="live-comfyui-workflow-mode">工作流模式</label>
+                            <select id="live-comfyui-workflow-mode">
+                                <option value="custom">自定义工作流</option>
+                                <option value="default">默认模板</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="live-comfyui-sampler">采样器</label>
+                            <select id="live-comfyui-sampler">
+                                <option value="euler">euler</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="live-comfyui-scheduler">调度器</label>
+                            <select id="live-comfyui-scheduler">
+                                <option value="normal">标准</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="live-comfyui-width">宽度</label>
+                            <input type="number" id="live-comfyui-width" value="768" min="256" max="2048" step="64" />
+                        </div>
+                        <div>
+                            <label for="live-comfyui-height">高度</label>
+                            <input type="number" id="live-comfyui-height" value="512" min="256" max="2048" step="64" />
+                        </div>
+                        <div>
+                            <label for="live-comfyui-steps">采样步数</label>
+                            <input type="number" id="live-comfyui-steps" value="20" min="1" max="150" />
+                        </div>
+                        <div>
+                            <label for="live-comfyui-cfg">CFG</label>
+                            <input type="number" id="live-comfyui-cfg" value="7.5" min="0.1" max="30" step="0.1" />
+                        </div>
+                        <div>
+                            <label for="live-comfyui-seed">随机种子</label>
+                            <input type="number" id="live-comfyui-seed" value="-1" />
+                        </div>
+                        <div>
+                            <label for="live-comfyui-timeout-ms">超时时间（毫秒）</label>
+                            <input type="number" id="live-comfyui-timeout-ms" value="180000" min="5000" step="1000" />
+                        </div>
+                    </div>
+                    <div class="sub-config-grid">
+                        <div>
+                            <label for="live-comfyui-prompt-prefix">正向前缀</label>
+                            <input type="text" id="live-comfyui-prompt-prefix" value="中文互动叙事场景" />
+                        </div>
+                        <div>
+                            <label for="live-comfyui-prompt-suffix">正向后缀</label>
+                            <input type="text" id="live-comfyui-prompt-suffix" value="高质量，细节丰富，电影感插画" />
+                        </div>
+                        <div>
+                            <label for="live-comfyui-negative-prompt">反向提示词</label>
+                            <input type="text" id="live-comfyui-negative-prompt" value="低质量，模糊，畸形，崩坏人体，水印，文字" />
+                        </div>
+                        <div>
+                            <label for="live-comfyui-filename-prefix">文件名前缀</label>
+                            <input type="text" id="live-comfyui-filename-prefix" value="rpg_scene" />
+                        </div>
+                    </div>
+                    <div id="live-comfyui-custom-workflow" style="margin-top:0.75rem">
+                        <textarea id="live-comfyui-workflow-json" rows="8" placeholder="这里会载入自定义工作流 JSON。"></textarea>
+                        <div class="sub-config-actions">
+                            <button type="button" id="live-validate-workflow-btn" class="test-btn">校验工作流</button>
+                        </div>
+                    </div>
+                </details>
+            </div>
+
+            <!-- API 子面板 -->
+            <div id="live-api-config" class="live-source-subpanel" style="display:none">
+                <div class="helper-text">接口服务模式，使用设置页面中配置的 API 地址和密钥进行生图。</div>
+            </div>
+
+            <!-- None 子面板 -->
+            <div id="live-none-config" class="live-source-subpanel" style="display:none">
+                <div class="helper-text">当前未启用图像生成。可在设置中切换图像来源。</div>
+            </div>
+
+            <div id="live-comfyui-status" class="helper-text">切换图像来源和模型后，设置会自动保存。</div>
         </div>
     `;
 
+    // Set the initial source selector value
+    const sourceSelect = document.getElementById('live-image-source');
+    if (sourceSelect) {
+        sourceSelect.value = currentSource;
+    }
+
+    // Show the correct sub-panel for current source
+    toggleLiveImageSourcePanel(currentSource);
+
     container.dataset.enhanced = 'true';
+}
+
+/**
+ * Show/hide the correct sub-panel based on selected image source
+ */
+export function toggleLiveImageSourcePanel(source) {
+    const subpanels = document.querySelectorAll('.live-source-subpanel');
+    subpanels.forEach((panel) => {
+        panel.style.display = 'none';
+    });
+
+    const targetPanel = document.getElementById(`live-${source}-config`);
+    if (targetPanel) {
+        targetPanel.style.display = 'block';
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -299,8 +422,11 @@ export function readComfyUIConfig() {
 }
 
 export function readLiveComfyUIConfig() {
-    return {
-        imageSource: getEffectiveGenerationConfig().imageSource,
+    // Read the live-image-source selector value
+    const liveSource = document.getElementById('live-image-source')?.value || getEffectiveGenerationConfig().imageSource;
+
+    const baseConfig = {
+        imageSource: liveSource,
         imageGenerationMode: getEffectiveGenerationConfig().imageGenerationMode,
         comfyuiUrl: document.getElementById('live-comfyui-url')?.value || 'http://127.0.0.1:8000',
         comfyuiImageCount: document.getElementById('scene-image-count')?.value || '1',
@@ -321,6 +447,22 @@ export function readLiveComfyUIConfig() {
         comfyuiWorkflowFile: document.getElementById('live-comfyui-workflow-file')?.value || '',
         comfyuiWorkflowJson: document.getElementById('live-comfyui-workflow-json')?.value || ''
     };
+
+    // Add source-specific config from the live panel
+    if (liveSource === 'pollinations') {
+        baseConfig.pollinationsModel = document.getElementById('live-pollinations-model')?.value || 'flux';
+        baseConfig.pollinationsWidth = document.getElementById('live-pollinations-width')?.value || '1440';
+        baseConfig.pollinationsHeight = document.getElementById('live-pollinations-height')?.value || '720';
+        baseConfig.pollinationsSeed = document.getElementById('live-pollinations-seed')?.value || '-1';
+    } else if (liveSource === 'puter') {
+        baseConfig.puterModel = document.getElementById('live-puter-model')?.value || 'gpt-image-1';
+        baseConfig.puterWidth = document.getElementById('live-puter-width')?.value || '1440';
+        baseConfig.puterHeight = document.getElementById('live-puter-height')?.value || '720';
+    } else if (liveSource === 'zai') {
+        baseConfig.zaiImageSize = document.getElementById('live-zai-size')?.value || '1440x720';
+    }
+
+    return baseConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -598,6 +740,8 @@ export function toggleImageSettings() {
     const source = document.getElementById('image-source').value;
     document.getElementById('comfyui-settings').style.display = source === 'comfyui' ? 'block' : 'none';
     document.getElementById('api-settings').style.display = source === 'api' ? 'block' : 'none';
+    document.getElementById('pollinations-settings').style.display = source === 'pollinations' ? 'block' : 'none';
+    document.getElementById('puter-settings').style.display = source === 'puter' ? 'block' : 'none';
     toggleComfyWorkflowMode();
 }
 
@@ -634,7 +778,15 @@ export function syncSceneImageControls() {
     }
 
     if (livePanel) {
-        livePanel.style.display = config.imageSource === 'comfyui' ? 'block' : 'none';
+        // Show the live-image-config panel for any enabled image source
+        livePanel.style.display = imagesEnabled ? 'block' : 'none';
+
+        // Sync the source selector and show correct sub-panel
+        const sourceSelect = document.getElementById('live-image-source');
+        if (sourceSelect && sourceSelect.value !== config.imageSource) {
+            sourceSelect.value = config.imageSource;
+        }
+        toggleLiveImageSourcePanel(config.imageSource);
     }
 
     // 根据图片源显示对应状态信息

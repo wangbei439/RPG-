@@ -171,7 +171,7 @@ app.get('/api/health', healthCheck({ db, games, generationSessions, projects }))
 // Mount route modules — all under /api prefix so frontend paths match
 // Order matters: more specific routes must come before catch-all routes like /:projectId
 app.use('/api', createGameRoutes(dependencies));
-app.use('/api', createGenerateRoutes(dependencies));
+app.use('/api/generate', createGenerateRoutes(dependencies));
 app.use('/api/settings', createSettingsRoutes({ db }));
 app.use('/api', createComfyuiRoutes(dependencies));
 app.use('/api', createSystemRoutes(dependencies));

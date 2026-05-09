@@ -1013,7 +1013,7 @@ class ImageService {
      * 内置 AI 图片生成，无需外部 ComfyUI 或 API Key
      */
     async generateWithZAI(prompt, config = {}) {
-        const size = config.zaiImageSize || '1344x768'; // 默认宽屏，适合游戏场景
+        const size = config.zaiImageSize || '1440x720'; // 默认宽屏，高分辨率，适合游戏场景
         const outputDir = path.join(__dirname, '..', 'public', 'scene-images');
 
         // 确保输出目录存在
@@ -1121,7 +1121,7 @@ class ImageService {
         }
 
         // 质量标签
-        parts.push('high quality, detailed, 4K');
+        parts.push('masterpiece, best quality, ultra detailed, 8K resolution');
 
         return parts.filter(Boolean).join(', ');
     }
@@ -1132,8 +1132,8 @@ class ImageService {
      * 支持参数: width, height, seed, model, nologo, enhance
      */
     async generateWithPollinations(prompt, config = {}) {
-        const width = config.pollinationsWidth || 1344;
-        const height = config.pollinationsHeight || 768;
+        const width = config.pollinationsWidth || 1440;
+        const height = config.pollinationsHeight || 720;
         const seed = Math.floor(Math.random() * 1_000_000_000);
         const model = config.pollinationsModel || 'flux';
 

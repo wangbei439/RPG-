@@ -131,7 +131,6 @@ module.exports = function({
 
         game.state = gameState;
         game.engine = engine;
-        game.config = configWithSettings;
 
         // Persist state change to SQLite
         db.saveGame(game.id, game.config, game.data, game.state);
@@ -157,7 +156,7 @@ module.exports = function({
         // Merge LLM settings with DB fallback
         const configWithSettings = {
             ...config,
-            settings: resolveLlmSettings(config.settings)
+            settings: resolveLlmSettings(config.settings, db)
         };
 
         const record = setGameRecord(restoredGameId, configWithSettings, gameData);
@@ -195,7 +194,7 @@ module.exports = function({
         }
 
         // Resolve LLM settings: use frontend-provided settings, or fall back to DB
-        const resolvedSettings = resolveLlmSettings(settings);
+        const resolvedSettings = resolveLlmSettings(settings, db);
         if (resolvedSettings.llmSource) {
             game.engine.reinitializeLLM(resolvedSettings);
         }
@@ -470,6 +469,71 @@ module.exports = function({
             gameState,
             message: `示例游戏「${example.name}」已启动`
         });
+    }));
+
+    // -----------------------------------------------------------------------
+    // POST /api/upload-scene-image
+    // 上传前端生成的图片（Puter.js 等前端 SDK 生成的图片）
+    // -----------------------------------------------------------------------
+    router.post('/upload-scene-image', asyncRoute('Upload scene image error', async (req, res) => {
+        const fs = require('fs');
+        const path = require('path');
+        const outputDir = path.join(__dirname, '..', 'public', 'scene-images');
+
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+        }
+
+        let imageUrl = null;
+
+        // 处理 FormData 上传（multipart）
+        if (req.is('multipart/form-data')) {
+            // 使用 busboy 或手动解析
+            const Busboy = require('busboy');
+            const busboy = Busboy({ headers: req.headers });
+
+            await new Promise((resolve, reject) => {
+                busboy.on('file', (fieldname, file, info) => {
+                    const filename = `puter_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`;
+                    const outputPath = path.join(outputDir, filename);
+                    const writeStream = fs.createWriteStream(outputPath);
+                    file.pipe(writeStream);
+                    writeStream.on('finish', () => {
+                        imageUrl = `/scene-images/${filename}`;
+                        resolve();
+                    });
+                    writeStream.on('error', reject);
+                });
+                busboy.on('finish', resolve);
+                busboy.on('error', reject);
+                req.pipe(busboy);
+            });
+        }
+        // 处理 JSON 上传（base64）
+        else if (req.is('application/json') && req.body?.base64) {
+            const base64Data = req.body.base64;
+            // 去掉 data:image/xxx;base64, 前缀
+            const matches = base64Data.match(/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/);
+            const buffer = matches
+                ? Buffer.from(matches[2], 'base64')
+                : Buffer.from(base64Data, 'base64');
+
+            const ext = matches ? matches[1] : 'png';
+            const filename = `puter_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+            const outputPath = path.join(outputDir, filename);
+            fs.writeFileSync(outputPath, buffer);
+            imageUrl = `/scene-images/${filename}`;
+        }
+        else {
+            throw createHttpError(400, '请提供 multipart 文件上传或 base64 JSON 数据');
+        }
+
+        if (!imageUrl) {
+            throw createHttpError(500, '图片保存失败');
+        }
+
+        logger.info('Scene image uploaded', { url: imageUrl });
+        res.json({ url: imageUrl });
     }));
 
     return router;

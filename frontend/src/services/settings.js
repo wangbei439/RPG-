@@ -44,7 +44,14 @@ const GENERATION_FIELDS = {
     comfyuiWorkflowFile: { id: 'comfyui-workflow-file', fallback: '' },
     comfyuiWorkflowJson: { id: 'comfyui-workflow-json', fallback: '' },
     imageApiUrl: { id: 'image-api-url', fallback: '' },
-    imageApiKey: { id: 'image-api-key', fallback: '' }
+    imageApiKey: { id: 'image-api-key', fallback: '' },
+    pollinationsModel: { id: 'pollinations-model', fallback: 'flux' },
+    pollinationsWidth: { id: 'pollinations-width', fallback: '1440' },
+    pollinationsHeight: { id: 'pollinations-height', fallback: '720' },
+    pollinationsSeed: { id: 'pollinations-seed', fallback: '-1' },
+    puterModel: { id: 'puter-model', fallback: 'gpt-image-1' },
+    puterWidth: { id: 'puter-width', fallback: '1440' },
+    puterHeight: { id: 'puter-height', fallback: '720' }
 };
 
 function readValue(id, doc) {

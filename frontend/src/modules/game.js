@@ -13,6 +13,7 @@ import { showToast } from '../services/toast.js';
 import {
     initializeLiveImageConfigPanel,
     toggleLiveWorkflowMode,
+    toggleLiveImageSourcePanel,
     syncSceneImageControls,
     syncLiveImageConfigState,
     readLiveComfyUIConfig,
@@ -167,6 +168,74 @@ export function initGameScreen() {
     document.getElementById('live-comfyui-workflow-mode')?.addEventListener('change', () => {
         toggleLiveWorkflowMode();
         syncLiveImageConfigState();
+    });
+
+    // Live image source selector
+    document.getElementById('live-image-source')?.addEventListener('change', async () => {
+        const sourceSelect = document.getElementById('live-image-source');
+        const newSource = sourceSelect?.value;
+        if (newSource) {
+            // Update the main image-source selector too
+            const mainSourceSelect = document.getElementById('image-source');
+            if (mainSourceSelect) {
+                mainSourceSelect.value = newSource;
+            }
+            // Update state
+            state.currentGenerationConfig.imageSource = newSource;
+            toggleLiveImageSourcePanel(newSource);
+            saveGenerationSettings();
+            syncSceneImageControls();
+
+            if (newSource === 'comfyui') {
+                await refreshLiveComfyUIOptions(false);
+            }
+        }
+    });
+
+    // Live Pollinations config fields
+    document.querySelectorAll('#live-pollinations-config input, #live-pollinations-config select').forEach((element) => {
+        element.addEventListener('change', () => {
+            // Sync to main config page fields
+            const fieldMap = {
+                'live-pollinations-model': 'pollinations-model',
+                'live-pollinations-width': 'pollinations-width',
+                'live-pollinations-height': 'pollinations-height',
+                'live-pollinations-seed': 'pollinations-seed'
+            };
+            const targetId = fieldMap[element.id];
+            if (targetId) {
+                const targetEl = document.getElementById(targetId);
+                if (targetEl) targetEl.value = element.value;
+            }
+            saveGenerationSettings();
+            syncSceneImageControls();
+        });
+    });
+
+    // Live Puter config fields
+    document.querySelectorAll('#live-puter-config input, #live-puter-config select').forEach((element) => {
+        element.addEventListener('change', () => {
+            const fieldMap = {
+                'live-puter-model': 'puter-model',
+                'live-puter-width': 'puter-width',
+                'live-puter-height': 'puter-height'
+            };
+            const targetId = fieldMap[element.id];
+            if (targetId) {
+                const targetEl = document.getElementById(targetId);
+                if (targetEl) targetEl.value = element.value;
+            }
+            saveGenerationSettings();
+            syncSceneImageControls();
+        });
+    });
+
+    // Live ZAI config fields
+    document.querySelectorAll('#live-zai-config input, #live-zai-config select').forEach((element) => {
+        element.addEventListener('change', () => {
+            saveGenerationSettings();
+            syncSceneImageControls();
+        });
     });
 
     document.getElementById('live-refresh-comfyui-btn')?.addEventListener('click', async () => {
@@ -508,9 +577,9 @@ async function sendPlayerAction(actionOverride = '') {
 
     try {
         const baseConfig = getEffectiveGenerationConfig();
-        const imageConfig = baseConfig.imageSource === 'comfyui'
-            ? { ...baseConfig, ...readLiveComfyUIConfig() }
-            : baseConfig;
+        // Always merge live panel config so in-game source/model changes take effect
+        const liveConfig = readLiveComfyUIConfig();
+        const imageConfig = { ...baseConfig, ...liveConfig };
 
         // 检查是否启用流式输出
         const useStreaming = state.settings?.enableStreaming !== false; // 默认启用
@@ -1181,7 +1250,48 @@ async function generateSceneImages() {
     state.currentGenerationConfig = liveConfig;
     localStorage.setItem(GENERATION_SETTINGS_KEY, JSON.stringify(liveConfig));
     setSceneImageLoadingState(true);
-    setSceneImageStatus('Generating images with ComfyUI...', 'pending');
+
+    // Puter.js 前端直接调用
+    if (liveConfig.imageSource === 'puter') {
+        setSceneImageStatus('正在通过 Puter.js 生成图片...', 'pending');
+        try {
+            const imageUrl = await generateWithPuter(prompt, liveConfig);
+            if (imageUrl) {
+                state.selectedSceneImageIndex = 0;
+                renderSceneImages([imageUrl], prompt);
+                setSceneImageStatus('Puter.js 图片生成成功！', 'success');
+            } else {
+                setSceneImageStatus('Puter.js 生成失败，尝试降级到 Pollinations...', 'pending');
+                // 降级到后端 Pollinations
+                const data = await requestJson(
+                    `/games/${state.currentGameId}/generate-image`,
+                    createJsonRequest('POST', { prompt, count, comfyuiImageCount: count, ...liveConfig })
+                );
+                state.selectedSceneImageIndex = 0;
+                renderSceneImages(data.images || [], data.prompt || prompt);
+                setSceneImageStatus(`降级使用 Pollinations 生成了 ${data.count || (data.images || []).length} 张图片。`, 'success');
+            }
+        } catch (error) {
+            console.error('Puter.js generation error:', error);
+            setSceneImageStatus(`Puter.js 生成失败: ${error.message}，降级到 Pollinations...`, 'pending');
+            try {
+                const data = await requestJson(
+                    `/games/${state.currentGameId}/generate-image`,
+                    createJsonRequest('POST', { prompt, count, comfyuiImageCount: count, ...liveConfig })
+                );
+                state.selectedSceneImageIndex = 0;
+                renderSceneImages(data.images || [], data.prompt || prompt);
+                setSceneImageStatus(`降级生成了 ${data.count || (data.images || []).length} 张图片。`, 'success');
+            } catch (fallbackError) {
+                setSceneImageStatus(fallbackError.message, 'error');
+            }
+        } finally {
+            setSceneImageLoadingState(false);
+        }
+        return;
+    }
+
+    setSceneImageStatus('Generating images...', 'pending');
 
     try {
         const data = await requestJson(
@@ -1198,6 +1308,161 @@ async function generateSceneImages() {
     } finally {
         setSceneImageLoadingState(false);
     }
+}
+
+/**
+ * 使用 Puter.js 前端 SDK 生成图片
+ * 完全免费，无需 API Key，在浏览器端直接调用
+ */
+async function generateWithPuter(prompt, config = {}) {
+    // 动态加载 Puter.js SDK
+    if (!window.puter) {
+        try {
+            await loadPuterSDK();
+        } catch (e) {
+            console.warn('[Puter] SDK 加载失败:', e);
+            return null;
+        }
+    }
+
+    if (!window.puter || !window.puter.ai) {
+        console.warn('[Puter] SDK 不可用');
+        return null;
+    }
+
+    const model = config.puterModel || 'gpt-image-1';
+    const enhancedPrompt = buildEnhancedPrompt(prompt, config);
+
+    try {
+        console.log('[Puter] Generating with model:', model, 'prompt:', enhancedPrompt.slice(0, 100));
+
+        const result = await window.puter.ai.txt2img(enhancedPrompt, { model });
+
+        if (!result) {
+            console.warn('[Puter] 返回结果为空');
+            return null;
+        }
+
+        // Puter 返回的可能是一个 URL 或者 base64 数据
+        let imageData;
+        if (typeof result === 'string') {
+            imageData = result;
+        } else if (result.url) {
+            imageData = result.url;
+        } else if (result.src) {
+            imageData = result.src;
+        } else if (result.data) {
+            imageData = result.data;
+        } else if (result.image) {
+            imageData = result.image;
+        }
+
+        if (!imageData) {
+            console.warn('[Puter] 无法解析返回结果:', result);
+            return null;
+        }
+
+        // 如果是 URL，需要下载并上传到后端
+        if (imageData.startsWith('http')) {
+            const uploadedUrl = await uploadImageToBackend(imageData);
+            return uploadedUrl;
+        }
+
+        // 如果是 base64，直接上传
+        if (imageData.startsWith('data:')) {
+            const uploadedUrl = await uploadBase64ToBackend(imageData);
+            return uploadedUrl;
+        }
+
+        // 尝试作为 base64 上传
+        const uploadedUrl = await uploadBase64ToBackend(imageData);
+        return uploadedUrl;
+    } catch (error) {
+        console.error('[Puter] Generation error:', error);
+        return null;
+    }
+}
+
+/**
+ * 动态加载 Puter.js SDK
+ */
+function loadPuterSDK() {
+    return new Promise((resolve, reject) => {
+        if (window.puter) {
+            resolve();
+            return;
+        }
+
+        const existingScript = document.querySelector('script[src*="puter.com"]');
+        if (existingScript) {
+            existingScript.addEventListener('load', resolve);
+            existingScript.addEventListener('error', reject);
+            return;
+        }
+
+        const script = document.createElement('script');
+        script.src = 'https://js.puter.com/v2/';
+        script.async = true;
+        script.addEventListener('load', () => {
+            console.log('[Puter] SDK loaded successfully');
+            resolve();
+        });
+        script.addEventListener('error', () => {
+            reject(new Error('Puter.js SDK 加载失败'));
+        });
+        document.head.appendChild(script);
+    });
+}
+
+/**
+ * 构建增强的生图提示词
+ */
+function buildEnhancedPrompt(rawPrompt, config = {}) {
+    const parts = [];
+    const style = config.artStyle || 'fantasy';
+    const styleMap = {
+        fantasy: 'fantasy RPG game art, magical atmosphere, rich colors, detailed illustration',
+        scifi: 'sci-fi RPG game art, futuristic atmosphere, neon lights, cinematic',
+        mystery: 'dark noir RPG game art, moody lighting, mysterious atmosphere, shadows',
+        cultivation: 'Chinese ink wash painting style, xianxia RPG, ethereal mountains, flowing robes',
+        romance: 'soft romantic RPG art, warm lighting, beautiful characters, pastel colors',
+        survival: 'harsh survival RPG art, desolate landscape, dramatic lighting, gritty',
+        kingdom: 'medieval RPG art, castle architecture, heraldic banners, epic scale',
+        dungeon: 'dark dungeon RPG art, torchlight, stone corridors, ominous shadows',
+        adventure: 'adventure RPG art, lush landscapes, heroic composition, vibrant',
+        custom: 'RPG game scene illustration, detailed, atmospheric, dramatic lighting'
+    };
+    parts.push(styleMap[style] || styleMap.custom);
+    if (rawPrompt) parts.push(rawPrompt);
+    parts.push('high quality, detailed, 4K');
+    return parts.filter(Boolean).join(', ');
+}
+
+/**
+ * 上传 URL 图片到后端
+ */
+async function uploadImageToBackend(imageUrl) {
+    const response = await fetch(imageUrl);
+    const blob = await response.blob();
+    const formData = new FormData();
+    formData.append('image', blob, `puter_${Date.now()}.png`);
+
+    const uploadResponse = await requestJson(
+        '/upload-scene-image',
+        { method: 'POST', body: formData }
+    );
+    return uploadResponse.url;
+}
+
+/**
+ * 上传 base64 图片到后端
+ */
+async function uploadBase64ToBackend(base64Data) {
+    const response = await requestJson(
+        '/upload-scene-image',
+        createJsonRequest('POST', { base64: base64Data })
+    );
+    return response.url;
 }
 
 // ---------------------------------------------------------------------------

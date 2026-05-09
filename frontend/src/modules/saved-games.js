@@ -179,6 +179,45 @@ export function getSavedGames() {
         });
 }
 
+// ---------------------------------------------------------------------------
+// Batch-select mode state
+// ---------------------------------------------------------------------------
+
+let selectMode = false;
+const selectedSaves = new Set();
+
+function exitSelectMode() {
+    selectMode = false;
+    selectedSaves.clear();
+    updateSelectModeUI();
+    renderSavedGamesList();
+}
+
+function updateSelectModeUI() {
+    const toggleBtn = document.getElementById('toggle-select-mode-btn');
+    const selectAllBtn = document.getElementById('select-all-saves-btn');
+    const batchDeleteBtn = document.getElementById('batch-delete-saves-btn');
+
+    if (toggleBtn) toggleBtn.textContent = selectMode ? '退出管理' : '批量管理';
+    if (selectAllBtn) selectAllBtn.style.display = selectMode ? '' : 'none';
+    if (batchDeleteBtn) batchDeleteBtn.style.display = selectMode ? '' : 'none';
+
+    // Update select-all button text based on current state
+    if (selectAllBtn) {
+        const savedGames = getSavedGames();
+        const allSelected = savedGames.length > 0 && savedGames.every(r => selectedSaves.has(r.gameId));
+        selectAllBtn.textContent = allSelected ? '取消全选' : '全选';
+    }
+
+    // Update batch delete button with count
+    if (batchDeleteBtn) {
+        batchDeleteBtn.textContent = selectedSaves.size > 0
+            ? `🗑️ 删除选中 (${selectedSaves.size})`
+            : '🗑️ 删除选中';
+        batchDeleteBtn.disabled = selectedSaves.size === 0;
+    }
+}
+
 export function renderSavedGamesList() {
     const container = document.getElementById('saved-games-list');
     if (!container) {
@@ -191,22 +230,74 @@ export function renderSavedGamesList() {
         return;
     }
 
-    container.innerHTML = savedGames.map((record) => `
-        <button type="button" class="saved-game-card" data-saved-game-id="${escapeHtml(record.gameId)}">
-            <div class="saved-game-header">
-                <span class="saved-game-name">${escapeHtml(record.title || '未命名存档')}</span>
-                <span class="saved-game-type">${escapeHtml(gameTypeNames[record.type] || record.type || '存档')}</span>
+    container.innerHTML = savedGames.map((record) => {
+        const isSelected = selectedSaves.has(record.gameId);
+        return `
+        <div class="saved-game-card${selectMode ? ' select-mode' : ''}${isSelected ? ' selected' : ''}" data-saved-game-id="${escapeHtml(record.gameId)}">
+            ${selectMode ? `<input type="checkbox" class="saved-game-checkbox" ${isSelected ? 'checked' : ''} />` : ''}
+            <div class="saved-game-body">
+                <div class="saved-game-header">
+                    <span class="saved-game-name">${escapeHtml(record.title || '未命名存档')}</span>
+                    <span class="saved-game-type">${escapeHtml(gameTypeNames[record.type] || record.type || '存档')}</span>
+                </div>
+                <div class="saved-game-info">ID: ${escapeHtml(record.gameId)}</div>
+                <div class="saved-game-time">${escapeHtml(record.savedAt ? new Date(record.savedAt).toLocaleString() : '旧版存档')}</div>
             </div>
-            <div class="saved-game-info">ID: ${escapeHtml(record.gameId)}</div>
-            <div class="saved-game-time">${escapeHtml(record.savedAt ? new Date(record.savedAt).toLocaleString() : '旧版存档')}</div>
-        </button>
-    `).join('');
+            ${!selectMode ? `<button type="button" class="saved-game-delete-btn" data-delete-id="${escapeHtml(record.gameId)}" title="删除此存档">✕</button>` : ''}
+        </div>
+    `}).join('');
 
-    container.querySelectorAll('[data-saved-game-id]').forEach((button) => {
-        button.addEventListener('click', async () => {
-            await loadSavedGame(button.dataset.savedGameId);
+    // Bind click events
+    container.querySelectorAll('[data-saved-game-id]').forEach((card) => {
+        card.addEventListener('click', async (e) => {
+            const gameId = card.dataset.savedGameId;
+
+            // If in select mode, toggle selection
+            if (selectMode) {
+                if (selectedSaves.has(gameId)) {
+                    selectedSaves.delete(gameId);
+                } else {
+                    selectedSaves.add(gameId);
+                }
+                updateSelectModeUI();
+                renderSavedGamesList();
+                return;
+            }
+
+            // Normal mode: load game
+            await loadSavedGame(gameId);
         });
     });
+
+    // Bind single delete buttons (only in normal mode)
+    container.querySelectorAll('[data-delete-id]').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const gameId = btn.dataset.deleteId;
+            if (confirm(`确定要删除存档「${gameId}」吗？`)) {
+                deleteSavedGame(gameId);
+                renderSavedGamesList();
+            }
+        });
+    });
+}
+
+function deleteSavedGame(gameId) {
+    localStorage.removeItem(`rpg_save_${gameId}`);
+    selectedSaves.delete(gameId);
+}
+
+async function batchDeleteSelected() {
+    if (selectedSaves.size === 0) return;
+    const count = selectedSaves.size;
+    if (!confirm(`确定要删除选中的 ${count} 个存档吗？此操作不可撤销。`)) return;
+
+    for (const gameId of selectedSaves) {
+        deleteSavedGame(gameId);
+    }
+    selectedSaves.clear();
+    updateSelectModeUI();
+    renderSavedGamesList();
 }
 
 export async function loadSavedGame(gameId) {
@@ -273,8 +364,14 @@ export async function loadSavedGame(gameId) {
 export function initSavedGames() {
     const loadSavedGamesButton = document.getElementById('load-saved-games-btn');
     const closeSavedGamesButton = document.getElementById('close-saved-games');
+    const toggleSelectModeBtn = document.getElementById('toggle-select-mode-btn');
+    const selectAllBtn = document.getElementById('select-all-saves-btn');
+    const batchDeleteBtn = document.getElementById('batch-delete-saves-btn');
 
     loadSavedGamesButton?.addEventListener('click', () => {
+        selectMode = false;
+        selectedSaves.clear();
+        updateSelectModeUI();
         renderSavedGamesList();
         const section = document.getElementById('saved-games-section');
         if (section) {
@@ -283,9 +380,39 @@ export function initSavedGames() {
     });
 
     closeSavedGamesButton?.addEventListener('click', () => {
+        exitSelectMode();
         const section = document.getElementById('saved-games-section');
         if (section) {
             section.style.display = 'none';
         }
+    });
+
+    toggleSelectModeBtn?.addEventListener('click', () => {
+        if (selectMode) {
+            exitSelectMode();
+        } else {
+            selectMode = true;
+            selectedSaves.clear();
+            updateSelectModeUI();
+            renderSavedGamesList();
+        }
+    });
+
+    selectAllBtn?.addEventListener('click', () => {
+        const savedGames = getSavedGames();
+        const allSelected = savedGames.length > 0 && savedGames.every(r => selectedSaves.has(r.gameId));
+        if (allSelected) {
+            selectedSaves.clear();
+        } else {
+            for (const record of savedGames) {
+                selectedSaves.add(record.gameId);
+            }
+        }
+        updateSelectModeUI();
+        renderSavedGamesList();
+    });
+
+    batchDeleteBtn?.addEventListener('click', () => {
+        batchDeleteSelected();
     });
 }
