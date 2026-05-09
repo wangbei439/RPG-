@@ -21,6 +21,10 @@ class ImageService {
                 return this.generateWithAPI(prompt, config);
             case 'zai':
                 return this.generateWithZAI(prompt, config);
+            case 'pollinations':
+                return this.generateWithPollinations(prompt, config);
+            case 'puter':
+                return this.generateWithPuter(prompt, config);
             default:
                 return null;
         }
@@ -36,6 +40,14 @@ class ImageService {
             }
             case 'zai': {
                 const image = await this.generateWithZAI(prompt, config);
+                return image ? [image] : [];
+            }
+            case 'pollinations': {
+                const image = await this.generateWithPollinations(prompt, config);
+                return image ? [image] : [];
+            }
+            case 'puter': {
+                const image = await this.generateWithPuter(prompt, config);
                 return image ? [image] : [];
             }
             default:
@@ -1112,6 +1124,82 @@ class ImageService {
         parts.push('high quality, detailed, 4K');
 
         return parts.filter(Boolean).join(', ');
+    }
+
+    /**
+     * Pollinations.AI 生图 —— 完全免费，无需 API Key
+     * 接口: GET https://image.pollinations.ai/prompt/{prompt}
+     * 支持参数: width, height, seed, model, nologo, enhance
+     */
+    async generateWithPollinations(prompt, config = {}) {
+        const width = config.pollinationsWidth || 1344;
+        const height = config.pollinationsHeight || 768;
+        const seed = Math.floor(Math.random() * 1_000_000_000);
+        const model = config.pollinationsModel || 'flux';
+
+        // 构建增强提示词（复用 ZAI 的提示词构建逻辑）
+        const enhancedPrompt = this.buildZAIPrompt(prompt, config);
+
+        const params = new URLSearchParams({
+            width: String(width),
+            height: String(height),
+            seed: String(seed),
+            model,
+            nologo: 'true',
+            enhance: 'true'
+        });
+
+        // 对 prompt 进行 URL 编码
+        const encodedPrompt = encodeURIComponent(enhancedPrompt);
+        const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?${params.toString()}`;
+
+        console.log('[Pollinations] Generating:', enhancedPrompt.slice(0, 100));
+
+        // 预请求验证：确保 Pollinations 能正常响应
+        try {
+            const response = await this.fetchWithTimeout(imageUrl, {
+                method: 'GET',
+                headers: { 'Accept': 'image/*' }
+            }, 60000);
+
+            if (!response.ok) {
+                throw new Error(`Pollinations API error: ${response.status} ${response.statusText}`);
+            }
+
+            // 验证返回的是图片
+            const contentType = response.headers.get('content-type') || '';
+            if (!contentType.startsWith('image/')) {
+                throw new Error(`Pollinations 返回非图片内容: ${contentType}`);
+            }
+
+            // 下载图片并保存到本地
+            const outputDir = path.join(__dirname, '..', 'public', 'scene-images');
+            if (!fs.existsSync(outputDir)) {
+                fs.mkdirSync(outputDir, { recursive: true });
+            }
+
+            const filename = `pollinations_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`;
+            const outputPath = path.join(outputDir, filename);
+            const buffer = Buffer.from(await response.arrayBuffer());
+            fs.writeFileSync(outputPath, buffer);
+
+            const localUrl = `/scene-images/${filename}`;
+            console.log('[Pollinations] Generated and saved:', localUrl);
+            return localUrl;
+        } catch (error) {
+            console.error('[Pollinations] Generation failed:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * Puter 生图 —— 通过前端调用（后端降级为 Pollinations）
+     * Puter.js 是前端 SDK，后端不支持直接调用
+     * 后端选择 puter 时自动降级使用 Pollinations 接口
+     */
+    async generateWithPuter(prompt, config = {}) {
+        console.log('[Puter] 后端不支持 Puter.js 直接调用，降级使用 Pollinations');
+        return this.generateWithPollinations(prompt, config);
     }
 }
 

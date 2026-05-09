@@ -36,3 +36,4 @@ docker-data/
 agent-ctx/
 backend/data/*.db-shm
 backend/data/*.db-wal
+backend/public/scene-images/*.png

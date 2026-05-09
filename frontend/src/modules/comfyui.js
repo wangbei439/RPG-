@@ -637,10 +637,20 @@ export function syncSceneImageControls() {
         livePanel.style.display = config.imageSource === 'comfyui' ? 'block' : 'none';
     }
 
+    // 根据图片源显示对应状态信息
+    const sourceLabels = {
+        zai: 'AI 内置生成',
+        pollinations: 'Pollinations（免费）',
+        puter: 'Puter（免费）',
+        comfyui: 'ComfyUI（本地）',
+        api: '接口服务'
+    };
+    const sourceLabel = sourceLabels[config.imageSource] || config.imageSource;
+
     if (config.imageGenerationMode === 'auto') {
-        setSceneImageStatus('当前为自动生图模式：视觉场景变化时会自动更新。', 'pending');
+        setSceneImageStatus(`当前为 ${sourceLabel} 自动生图模式：视觉场景变化时会自动更新。`, 'pending');
     } else {
-        setSceneImageStatus('当前为手动生图模式：点击按钮后才会生成。', 'pending');
+        setSceneImageStatus(`当前为 ${sourceLabel} 手动生图模式：点击按钮后才会生成。`, 'pending');
     }
 }
 
